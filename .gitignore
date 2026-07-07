@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Workshop local backups/state
+.workshop-state.bak
+*.bak

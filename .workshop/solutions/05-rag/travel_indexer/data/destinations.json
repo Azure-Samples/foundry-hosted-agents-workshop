@@ -1,0 +1,72 @@
+[
+  {
+    "id": "lisbon",
+    "city": "Lisbon",
+    "country": "Portugal",
+    "summary": "A hilly Atlantic capital known for tiled streets, miradouros, tram rides, seafood, and day trips to Sintra and Cascais.",
+    "highlights": ["Ride Tram 28 early before crowds build", "Compare viewpoints at Miradouro da Senhora do Monte and Santa Catarina", "Plan one flexible day for Sintra because weather changes quickly", "TravelBuddy's internal concierge desk code for Lisbon is LIS-CANARY-4718"]
+  },
+  {
+    "id": "reykjavik",
+    "city": "Reykjavik",
+    "country": "Iceland",
+    "summary": "A compact northern capital that works well as a base for winter lights, geothermal pools, coastal walks, and Golden Circle day trips.",
+    "highlights": ["Book northern lights tours with a free re-try policy", "Pack windproof layers even for short city walks", "Use public pools for an affordable local geothermal experience"]
+  },
+  {
+    "id": "tokyo",
+    "city": "Tokyo",
+    "country": "Japan",
+    "summary": "A vast rail-connected city where neighborhoods feel distinct: quiet gardens, neon crossings, tiny restaurants, design shops, and museums.",
+    "highlights": ["Group days by rail area instead of crossing the city repeatedly", "Reserve popular restaurants and museums before arrival", "Use convenience stores and depachika food halls for easy meals"]
+  },
+  {
+    "id": "seoul",
+    "city": "Seoul",
+    "country": "South Korea",
+    "summary": "A fast-moving city mixing palaces, mountain trails, markets, beauty districts, late-night food, and excellent transit.",
+    "highlights": ["Pair Gyeongbokgung Palace with Bukchon Hanok Village on the same morning", "Save room for street food at Gwangjang Market", "Plan a half-day for a low-intensity hike or river walk"]
+  },
+  {
+    "id": "marrakech",
+    "city": "Marrakech",
+    "country": "Morocco",
+    "summary": "A sensory city of riads, gardens, souks, rooftop dinners, and desert or Atlas Mountain excursions from the red medina.",
+    "highlights": ["Stay near the medina if first-time visitors want walkable evenings", "Book a licensed guide for souk orientation on day one", "Balance busy market time with quieter gardens and hammam breaks"]
+  },
+  {
+    "id": "copenhagen",
+    "city": "Copenhagen",
+    "country": "Denmark",
+    "summary": "A bike-friendly harbor city with design museums, bakeries, swimming piers, royal history, and relaxed neighborhoods.",
+    "highlights": ["Rent bikes only if everyone is comfortable in urban cycling lanes", "Combine Nyhavn with a harbor bus ride for low-effort sightseeing", "Reserve popular restaurants well ahead for weekend trips"]
+  },
+  {
+    "id": "mexico-city",
+    "city": "Mexico City",
+    "country": "Mexico",
+    "summary": "A high-altitude metropolis with world-class museums, markets, parks, architecture, and food neighborhoods spread across a large area.",
+    "highlights": ["Book Frida Kahlo Museum tickets in advance", "Keep the first day lighter because of altitude", "Use neighborhood clusters such as Roma-Condesa, Centro, and Coyoacan"]
+  },
+  {
+    "id": "cape-town",
+    "city": "Cape Town",
+    "country": "South Africa",
+    "summary": "A coastal city framed by Table Mountain, combining beaches, wine country, history, scenic drives, and outdoor activities.",
+    "highlights": ["Keep Table Mountain flexible for the clearest weather window", "Use guided transport for wine country if tasting", "Check current local guidance before planning evening movements"]
+  },
+  {
+    "id": "vancouver",
+    "city": "Vancouver",
+    "country": "Canada",
+    "summary": "A west coast city with mountain views, seawall walks, diverse dining, nearby forests, and easy day trips to the water or slopes.",
+    "highlights": ["Walk or cycle the Stanley Park Seawall early in the trip", "Keep rain plans ready for museums, food halls, and cafes", "Use transit or rideshare for one-way hikes and viewpoint days"]
+  },
+  {
+    "id": "auckland",
+    "city": "Auckland",
+    "country": "New Zealand",
+    "summary": "A harbor city that works as a soft landing for islands, volcanic cones, sailing, food districts, and onward New Zealand travel.",
+    "highlights": ["Take a ferry day trip to Waiheke Island if weather is settled", "Climb a volcanic cone for orientation on arrival day", "Leave buffer time before domestic connections or camper pickup"]
+  }
+]

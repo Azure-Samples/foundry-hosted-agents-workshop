@@ -1,0 +1,10 @@
+name: hotels-specialist
+version: 0.1.0
+description: Tool and retrieval slice for the Hotels specialist.
+tools:
+  - name: convert_currency
+    source: travel_assistant.tools
+rag:
+  - name: destinations-index
+    source: azure-ai-search
+skills: []

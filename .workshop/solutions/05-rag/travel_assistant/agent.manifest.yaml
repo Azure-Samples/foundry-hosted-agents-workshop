@@ -1,0 +1,65 @@
+# NOTE: `name` (and `template.name` below) must be a hardcoded literal here — do
+# NOT use ${VAR} or {{VAR}}. `azd ai agent init` reads and validates the agent
+# name as-is, BEFORE any substitution: it never expands ${VAR} (those resolve later
+# at deploy/run from .env / Bicep outputs) and only substitutes {{VAR}} for values
+# declared under a `parameters:` block, which happens AFTER the name is validated.
+# The validator rejects `$`, `{`, and `}`, so a placeholder here fails with
+# "invalid agent name". The runtime-configurable prefix still lives in agent.yaml's
+# `name` and in the WORKSHOP_RESOURCE_PREFIX environment variable below.
+name: travel-buddy
+description: >
+  TravelBuddy is an Agent Framework hosted agent with local Python function tools
+  for weather, local time, and currency, a Foundry Toolbox that bundles web search,
+  Code Interpreter, and the OctoTrip flights MCP server, and RAG grounding over a
+  curated destinations index in Azure AI Search.
+metadata:
+  tags: [Agent Framework, AI Agent Hosting, Azure AI AgentServer, Responses Protocol, Travel Assistant, Function Tools, MCP Tools, Toolbox Tools, RAG]
+  tool_declarations:
+    - name: get_weather
+      description: Returns mock destination weather for a city and optional date.
+      parameters:
+        city: string
+        date: "string | null"
+    - name: get_local_time
+      description: Returns the current local time for a destination city.
+      parameters:
+        city: string
+    - name: convert_currency
+      description: Converts mock travel prices between USD, EUR, JPY, and GBP.
+      parameters:
+        amount: float
+        from_currency: string
+        to_currency: string
+    - name: travel-toolbox
+      description: >
+        Foundry Toolbox bundling web_search, code_interpreter, and the OctoTrip
+        flights MCP server, consumed from one project-managed endpoint.
+      type: toolbox
+      endpoint: ${TOOLBOX_ENDPOINT}
+    - name: travelbuddy_destinations
+      description: >
+        Azure AI Search retrieval over the curated destinations index; injects the
+        top-k matching destination records into context before each turn.
+      type: azure_ai_search
+      endpoint: ${AZURE_AI_SEARCH_ENDPOINT}
+template:
+  name: travel-buddy
+  kind: hosted
+  protocols:
+    - protocol: responses
+      version: 2.0.0
+  environment_variables:
+    - name: AZURE_AI_PROJECT_ENDPOINT
+      value: ${AZURE_AI_PROJECT_ENDPOINT}
+    - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+      value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+    - name: WORKSHOP_RESOURCE_PREFIX
+      value: ${WORKSHOP_RESOURCE_PREFIX}
+    - name: TOOLBOX_ENDPOINT
+      value: ${TOOLBOX_ENDPOINT}
+    - name: AZURE_AI_SEARCH_ENDPOINT
+      value: ${AZURE_AI_SEARCH_ENDPOINT}
+    - name: AZURE_AI_SEARCH_INDEX_NAME
+      value: ${AZURE_AI_SEARCH_INDEX_NAME}
+
+resources: []

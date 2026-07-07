@@ -1,0 +1,122 @@
+name: Advance workshop on push to main
+
+on:
+  push:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared with init-workshop.yml and start-workshop.yml so all three workflows
+  # serialize on the same branch and never race on git push or on the workshop
+  # state file. Queue (don't cancel) — the tip gate below makes the latest push
+  # win, so cancelling in-flight runs is unnecessary and could drop the one run
+  # that would advance.
+  group: workshop-state-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  advance:
+    # Only auto-advance on pushes to the default branch of a real workshop
+    # instance. Skip:
+    #   - template repositories (Azure-Samples/foundry-hosted-agents-workshop and forks
+    #     still marked as templates) so pushes there never rewrite the source;
+    #   - non-branch refs (a tag named like the default branch must not trigger);
+    #   - non-default branches (work happens on main);
+    #   - the bot's own commits. Pushes made with GITHUB_TOKEN don't retrigger
+    #     workflows, so this is belt-and-suspenders against any future PAT push.
+    if: >-
+      github.event.repository.is_template == false &&
+      github.ref_type == 'branch' &&
+      github.ref_name == github.event.repository.default_branch &&
+      github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether to advance
+        id: guard
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          # 1) Tip gate: only the push that is currently the branch tip advances.
+          #    A burst of rapid pushes therefore yields exactly one advance (the
+          #    latest), and a stale queued event never triggers a non-fast-forward
+          #    push. Sequential "one push per finished step" still advances each
+          #    time because each push is the tip when its run executes.
+          git fetch --quiet origin "$GITHUB_REF_NAME"
+          remote_sha="$(git rev-parse "origin/$GITHUB_REF_NAME")"
+          if [[ "$remote_sha" != "$GITHUB_SHA" ]]; then
+            echo "A newer push already landed on $GITHUB_REF_NAME; skipping this stale event ($GITHUB_SHA)."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git reset --hard "$remote_sha"
+
+          # 2) State-file guard: if this push already carried a change to
+          #    .workshop_instance/.workshop-state.json, it was an advance/reset/init
+          #    commit (the bot's own, or a local `make advance`). Advancing again
+          #    would double-step, so skip. Prefer the event payload file lists
+          #    (robust for force-push, where BEFORE_SHA may be unreachable); fall
+          #    back to git diff. Match the path as a fixed string (not a regex) so
+          #    the dots in the path can't act as wildcards.
+          STATE_PATH=".workshop_instance/.workshop-state.json"
+          changed_state=false
+          if [[ -f "$GITHUB_EVENT_PATH" ]] && command -v jq >/dev/null 2>&1; then
+            if jq -e --arg p "$STATE_PATH" '[ (.commits[]?, (.head_commit // empty)) | (.added[]?, .modified[]?, .removed[]?) ] | index($p)' "$GITHUB_EVENT_PATH" >/dev/null; then
+              changed_state=true
+            fi
+          elif [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            if git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA" | grep -Fxq -- "$STATE_PATH"; then
+              changed_state=true
+            fi
+          fi
+
+          if [[ "$changed_state" == "true" ]]; then
+            echo "This push already changed $STATE_PATH (advance/reset/init); skipping to avoid a double advance."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Python
+        if: steps.guard.outputs.proceed == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        if: steps.guard.outputs.proceed == 'true'
+        run: pip install -r .workshop/scripts/requirements.txt
+
+      - name: Advance workshop step
+        id: advance
+        if: steps.guard.outputs.proceed == 'true'
+        # No-op (advanced=false) before init, at Setup (step 0), and at the final
+        # step; advances exactly one step otherwise. Fails loudly only when state
+        # is missing/corrupt after initialization.
+        run: python .workshop/scripts/advance_step.py --on-push
+
+      - name: Commit & push
+        if: steps.advance.outputs.advanced == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "workshop: advance to step ${NEW_STEP}"
+          git push
+
+      - name: Summarize advancement
+        if: steps.advance.outputs.advanced == 'true'
+        run: |
+          echo "## ✅ Advanced to step ${NEW_STEP}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Your push completed the previous step, so the workshop loaded the next one." >> "$GITHUB_STEP_SUMMARY"
+          echo "Run \`git pull\` to refresh your README and the new step's files." >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,73 @@
+name: Start the workshop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared with init-workshop.yml and advance-on-push.yml so all three workflows
+  # serialize on the same branch. The self-heal step below can lay down step 0
+  # files just like the init workflow does, so they must not run concurrently.
+  group: workshop-state-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r .workshop/scripts/requirements.txt
+
+      - name: Ensure workshop initialized
+        # Self-heal: if a user reaches this workflow before init-workshop ran,
+        # perform the one-time init now. No-op when the marker file already
+        # exists. Skipped in template repos themselves so manually dispatching
+        # this workflow in the template doesn't bake owner/repo into the source.
+        #
+        # When the marker is missing we also run advance_step.py --init, which
+        # lays down .workshop/step_files/00/ into travel_assistant/. Without it,
+        # the self-heal would only render README and create the marker, leaving
+        # the repo permanently missing the step 0 starter files.
+        if: github.event.repository.is_template == false
+        shell: bash
+        run: |
+          if [[ ! -f .workshop_instance/.workshop-initialized ]]; then
+            python .workshop/scripts/advance_step.py --init
+          fi
+          python .workshop/scripts/init_workshop.py \
+            --owner "${{ github.repository_owner }}" \
+            --repo "${{ github.event.repository.name }}"
+
+      - name: Start the workshop (advance Setup -> Step 1)
+        # --expected 0 guards against dispatching this from a later step: it only
+        # ever moves the workshop off Setup. From Step 1 onward, learners advance
+        # by pushing to the default branch (see advance-on-push.yml).
+        run: python .workshop/scripts/advance_step.py --expected 0
+
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "workshop: advance to step ${NEW_STEP}"
+          git push
+
+      - name: Summarize advancement
+        run: |
+          echo "## ✅ Workshop started — you're on step ${NEW_STEP}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "If you're working locally, run \`git pull\` to refresh your README and workshop files." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "From here on, **commit your work and push to \`${{ github.event.repository.default_branch }}\`** to load each next step — no button needed." >> "$GITHUB_STEP_SUMMARY"

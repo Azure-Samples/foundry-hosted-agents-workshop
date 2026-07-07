@@ -1,0 +1,14 @@
+name: flights-specialist
+version: 0.1.0
+description: Tool slice for the Flights specialist.
+tools:
+  - name: get_weather
+    source: travel_assistant.tools
+  - name: get_local_time
+    source: travel_assistant.tools
+  - name: convert_currency
+    source: travel_assistant.tools
+  - name: travel-toolbox
+    source: foundry-toolbox
+rag: []
+skills: []

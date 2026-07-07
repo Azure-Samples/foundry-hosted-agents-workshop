@@ -1,0 +1,88 @@
+name: Initialize workshop
+
+on:
+  push:
+  create:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared with start-workshop.yml and advance-on-push.yml so all three
+  # workflows serialize on the same branch. Otherwise, the "Start the workshop"
+  # action, an auto-advance push, and this first-run initialization could race
+  # on git push and on the self-heal path that lays down step 0.
+  group: workshop-state-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  initialize:
+    # Skip in template repositories themselves — both Azure-Samples/foundry-hosted-agents-workshop
+    # and any downstream forks marked as templates. Running init there would bake the
+    # template owner/repo into the source files and break all future instantiations.
+    # Run for manual dispatch, for the first push on the default branch (the
+    # reliable signal for template-instantiated repos), and for the create
+    # event on the default branch when GitHub does emit it. Compare against
+    # the short ref name (`main`), not `refs/heads/main`, because that is what
+    # `github.event.ref` holds for create events.
+    if: >-
+      github.event.repository.is_template == false && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' &&
+          github.ref_type == 'branch' &&
+          github.ref_name == github.event.repository.default_branch) ||
+        (github.event_name == 'create' &&
+          github.event.ref_type == 'branch' &&
+          github.event.ref == github.event.repository.default_branch)
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check initialization marker
+        id: init-check
+        shell: bash
+        run: |
+          if [[ -f .workshop_instance/.workshop-initialized ]]; then
+            echo "already initialized"
+            echo "initialized=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "initialized=false" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Python
+        if: steps.init-check.outputs.initialized != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # advance_step.py, init_workshop.py and render_readme.py are stdlib-only,
+      # so we deliberately skip `pip install -r .workshop/scripts/requirements.txt`
+      # here: .workshop/scripts/requirements.txt only carries pytest for the test
+      # suite, which this workflow does not run. Avoiding the install removes a
+      # network round-trip and a potential failure mode during repo creation.
+
+      - name: Apply step 0 (lay down starter files into travel_assistant/)
+        if: steps.init-check.outputs.initialized != 'true'
+        run: python .workshop/scripts/advance_step.py --init
+
+      - name: Initialize workshop (render README, substitute placeholders, create marker)
+        if: steps.init-check.outputs.initialized != 'true'
+        run: |
+          python .workshop/scripts/init_workshop.py \
+            --owner "${{ github.repository_owner }}" \
+            --repo "${{ github.event.repository.name }}"
+
+      - name: Commit and push
+        if: steps.init-check.outputs.initialized != 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "workshop: initialize for ${{ github.repository }}"
+          git push

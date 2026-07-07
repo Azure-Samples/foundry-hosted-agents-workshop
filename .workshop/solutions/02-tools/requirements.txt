@@ -1,0 +1,6 @@
+# ---- Agent Framework with Microsoft Foundry ----
+agent-framework-foundry
+agent-framework-foundry-hosting>=1.0.0a260630
+
+# ---- Local Debugging in Foundry Toolkit ----
+debugpy

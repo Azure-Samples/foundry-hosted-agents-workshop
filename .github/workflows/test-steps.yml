@@ -1,0 +1,46 @@
+name: Test workshop scripts
+
+on:
+  pull_request:
+    paths:
+      - ".workshop/docs/**"
+      - ".workshop/scripts/**"
+      - ".workshop/step_files/**"
+      - ".workshop/solutions/**"
+      - ".workshop_instance/.workshop-state.json"
+      - ".github/workflows/test-steps.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".workshop/docs/**"
+      - ".workshop/scripts/**"
+      - ".workshop/step_files/**"
+      - ".workshop/solutions/**"
+      - ".workshop_instance/.workshop-state.json"
+      - ".github/workflows/test-steps.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-steps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install script dependencies
+        run: pip install -r .workshop/scripts/requirements.txt
+
+      - name: Run tests
+        run: python -m pytest .workshop/scripts/tests -v

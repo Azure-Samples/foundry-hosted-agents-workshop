@@ -1,0 +1,34 @@
+# travel_assistant/agent.manifest.yaml
+# NOTE: `name` (and `template.name` below) must be a hardcoded literal here — do
+# NOT use ${VAR} or {{VAR}}. `azd ai agent init` reads and validates the agent
+# name as-is, BEFORE any substitution: it never expands ${VAR} (those resolve later
+# at deploy/run from .env / Bicep outputs) and only substitutes {{VAR}} for values
+# declared under a `parameters:` block, which happens AFTER the name is validated.
+# The validator rejects `$`, `{`, and `}`, so a placeholder here fails with
+# "invalid agent name". The runtime-configurable prefix still lives in agent.yaml's
+# `name` and in the WORKSHOP_RESOURCE_PREFIX environment variable below.
+name: travel-buddy
+description: >
+  A basic Agent Framework travel assistant hosted by Foundry.
+metadata:
+  tags:
+    - Agent Framework
+    - AI Agent Hosting
+    - Azure AI AgentServer
+    - Responses Protocol
+    - Travel Assistant
+template:
+  name: travel-buddy
+  kind: hosted
+  protocols:
+    - protocol: responses
+      version: 2.0.0
+  environment_variables:
+    - name: AZURE_AI_PROJECT_ENDPOINT
+      value: ${AZURE_AI_PROJECT_ENDPOINT}
+    - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+      value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+    - name: WORKSHOP_RESOURCE_PREFIX
+      value: ${WORKSHOP_RESOURCE_PREFIX}
+# Model is pre-deployed (Step 0) and selected at runtime via AZURE_AI_MODEL_DEPLOYMENT_NAME.
+resources: []

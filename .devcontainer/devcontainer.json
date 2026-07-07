@@ -1,0 +1,29 @@
+{
+  "name": "Foundry Agent Framework Workshop",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/azure-cli:1": {
+      "installBicep": true
+    },
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers/features/copilot-cli:1": {}
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "forwardPorts": [],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.debugpy",
+        "ms-windows-ai-studio.windows-ai-studio",
+        "ms-azuretools.vscode-bicep",
+        "ms-azuretools.vscode-azure-mcp-server",
+        "redhat.vscode-yaml",
+        "GitHub.vscode-pull-request-github"
+      ]
+    }
+  }
+}
