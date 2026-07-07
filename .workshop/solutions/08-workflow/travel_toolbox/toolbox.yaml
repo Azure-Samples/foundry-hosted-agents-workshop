@@ -1,0 +1,19 @@
+# travel_toolbox/toolbox.yaml
+# Defines the Foundry Toolbox TravelBuddy consumes. Create it once with:
+#   azd ai toolbox create <toolbox-name> --from-file ./travel_toolbox/toolbox.yaml
+# After creating it, copy the versioned MCP endpoint the command prints and set it
+# as the TOOLBOX_ENDPOINT environment variable (azd env set TOOLBOX_ENDPOINT ...).
+# The agent connects to that endpoint at runtime via FoundryToolbox(credential).
+description: TravelBuddy tools — web search, Code Interpreter, and flight search.
+tools:
+  - type: web_search
+    name: web_search
+    require_approval: "never"
+  - type: code_interpreter
+    name: code_interpreter
+    require_approval: "never"
+  - type: mcp
+    # OctoTrip Flights MCP — public and anonymous, so no connection/auth is needed.
+    server_label: octotrip-flights
+    server_url: "https://mcp.octotrip.app/flights/mcp"
+    require_approval: "never"

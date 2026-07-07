@@ -1,0 +1,11 @@
+date,category,description,city,currency,amount
+2026-05-03,flights,Outbound flight from Seattle to Lisbon,Lisbon,USD,780.00
+2026-05-04,hotels,Hotel Baixa first night,Lisbon,EUR,168.50
+2026-05-05,meals,Seafood lunch near Cais do Sodre,Lisbon,EUR,34.20
+2026-05-05,activities,Tile museum tickets,Lisbon,EUR,16.00
+2026-05-06,transport,Metro and tram day passes,Lisbon,EUR,14.00
+2026-05-06,activities,Sintra guided day tour,Sintra,EUR,92.00
+2026-05-07,hotels,Hotel Baixa second night,Lisbon,EUR,168.50
+2026-05-07,meals,Fado dinner reservation,Lisbon,EUR,62.00
+2026-05-08,activities,Private food market tour,Lisbon,EUR,75.00
+2026-05-09,flights,Return flight Lisbon to Seattle,Lisbon,USD,825.00

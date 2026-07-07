@@ -1,0 +1,43 @@
+name: Lint workshop steps
+
+on:
+  pull_request:
+    paths:
+      - ".workshop/docs/**"
+      - ".workshop/scripts/**"
+      - ".workshop/step_files/**"
+      - ".workshop/solutions/**"
+      - ".workshop_instance/.workshop-state.json"
+      - ".github/workflows/lint-steps.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".workshop/docs/**"
+      - ".workshop/scripts/**"
+      - ".workshop/step_files/**"
+      - ".workshop/solutions/**"
+      - ".workshop_instance/.workshop-state.json"
+      - ".github/workflows/lint-steps.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-steps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  step-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate workshop step consistency
+        run: python .workshop/scripts/lint_steps.py

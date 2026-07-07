@@ -1,0 +1,84 @@
+# NOTE: `name` (and `template.name` below) must be a hardcoded literal here — do
+# NOT use ${VAR} or {{VAR}}. `azd ai agent init` reads and validates the agent
+# name as-is, BEFORE any substitution: it never expands ${VAR} (those resolve later
+# at deploy/run from .env / Bicep outputs) and only substitutes {{VAR}} for values
+# declared under a `parameters:` block, which happens AFTER the name is validated.
+# The validator rejects `$`, `{`, and `}`, so a placeholder here fails with
+# "invalid agent name". The runtime-configurable prefix still lives in agent.yaml's
+# `name` and in the WORKSHOP_RESOURCE_PREFIX environment variable below.
+name: travel-buddy
+description: >
+  TravelBuddy is an Agent Framework hosted agent exposed as a runtime multi-agent
+  handoff: a Coordinator routes each turn to Flights, Hotels, or Activities
+  specialists. The specialists share the carried capabilities — function tools, the
+  Foundry Toolbox (web search, Code Interpreter, OctoTrip flights), destination RAG
+  in Azure AI Search, the local travel-guide Skill, and a required Foundry
+  response-guardrails Skill (downloaded from the project and shareable across agents) — sliced
+  per role.
+metadata:
+  tags: [Agent Framework, AI Agent Hosting, Azure AI AgentServer, Responses Protocol, Travel Assistant, Function Tools, MCP Tools, Toolbox Tools, RAG, Skills, Foundry Skills, Multi-Agent]
+  tool_declarations:
+    - name: get_weather
+      description: Returns mock destination weather for a city and optional date.
+      parameters:
+        city: string
+        date: "string | null"
+    - name: get_local_time
+      description: Returns the current local time for a destination city.
+      parameters:
+        city: string
+    - name: convert_currency
+      description: Converts mock travel prices between USD, EUR, JPY, and GBP.
+      parameters:
+        amount: float
+        from_currency: string
+        to_currency: string
+    - name: travel-toolbox
+      description: >
+        Foundry Toolbox bundling web_search, code_interpreter, and the OctoTrip
+        flights MCP server, consumed from one project-managed endpoint.
+      type: toolbox
+      endpoint: ${TOOLBOX_ENDPOINT}
+    - name: travelbuddy_destinations
+      description: >
+        Azure AI Search retrieval over the curated destinations index; injects the
+        top-k matching destination records into context before each turn.
+      type: azure_ai_search
+      endpoint: ${AZURE_AI_SEARCH_ENDPOINT}
+    - name: travel-guide
+      description: >
+        Local Skill that renders a grounded, downloadable PDF travel guide (with a
+        day-by-day itinerary) via scripts/create_travel_guide.py.
+      type: skill
+    - name: response-guardrails
+      description: >
+        Foundry Responsible-AI guardrails Skill downloaded from the project and attached to
+        the Activities specialist; shareable across agents and required by this step.
+        Uploaded out-of-band via foundry_skills/provision_skills.py.
+      type: skill
+  handoff:
+    coordinator: Coordinator
+    specialists: [FlightsSpecialist, HotelsSpecialist, ActivitiesSpecialist]
+template:
+  name: travel-buddy
+  kind: hosted
+  protocols:
+    - protocol: responses
+      version: 2.0.0
+  environment_variables:
+    - name: AZURE_AI_PROJECT_ENDPOINT
+      value: ${AZURE_AI_PROJECT_ENDPOINT}
+    - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+      value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+    - name: WORKSHOP_RESOURCE_PREFIX
+      value: ${WORKSHOP_RESOURCE_PREFIX}
+    - name: TOOLBOX_ENDPOINT
+      value: ${TOOLBOX_ENDPOINT}
+    - name: AZURE_AI_SEARCH_ENDPOINT
+      value: ${AZURE_AI_SEARCH_ENDPOINT}
+    - name: AZURE_AI_SEARCH_INDEX_NAME
+      value: ${AZURE_AI_SEARCH_INDEX_NAME}
+    - name: FOUNDRY_SKILL_NAMES
+      value: ${FOUNDRY_SKILL_NAMES}
+
+resources: []

@@ -1,0 +1,18 @@
+# ---- Agent Framework with Microsoft Foundry ----
+agent-framework-foundry
+agent-framework-foundry-hosting>=1.0.0a260630
+
+# ---- Multi-agent orchestration (HandoffBuilder) ----
+agent-framework-orchestrations
+
+# ---- Local Debugging in Foundry Toolkit ----
+debugpy
+
+# ---- RAG (Azure AI Search) ----
+agent-framework-azure-ai-search
+azure-search-documents
+
+# ---- Memory (Foundry Memory Store) + Foundry skills ----
+# azure-ai-projects powers both the Memory Store and the Foundry Skills API
+# (upload via foundry_skills/provision_skills.py + runtime download).
+azure-ai-projects
