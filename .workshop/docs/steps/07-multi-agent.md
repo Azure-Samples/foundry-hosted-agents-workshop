@@ -13,9 +13,10 @@
 
 - Everything from Steps 1–6 in `travel_assistant/` — the three function tools, the Foundry Toolbox, the Step 5 RAG provider, and the Step 6 itinerary skill. Nothing was deleted when you advanced.
 - `travel_toolbox/toolbox.yaml` — the toolbox definition, still a sibling of `travel_assistant/`.
-- `travel_assistant/agents/{flights,hotels,activities}/` and `travel_assistant/coordinator.py` — scaffolding delivered when you advanced; you fill them in below.
+- `travel_assistant/agents/{flights,hotels,activities}/` — the per-specialist config slices (`agent.yaml` + `agent.manifest.yaml`), delivered complete when you advanced. You **read** these; you don't edit them.
+- `travel_assistant/coordinator.py` — a starter scaffold with `TODO`s that you fill in below.
 
-In this step you make **delta-only** edits: add per-specialist config slices under `agents/`, build the handoff graph in `coordinator.py`, and point `main.py` at the Coordinator. There are **no** new environment variables and no manifest env changes — only a `Multi-Agent` tag and a `handoff` metadata block.
+In this step you make **delta-only** edits: read the per-specialist config slices under `agents/`, build the handoff graph in `coordinator.py`, and point `main.py` at the Coordinator. There are **no** new environment variables and no manifest env changes — only a `Multi-Agent` tag and a `handoff` metadata block.
 
 ## Concept (5-min read)
 
@@ -42,7 +43,7 @@ graph TD
     Flights -- hand back --> Coordinator
     Hotels -- hand back --> Coordinator
     Activities -- hand back --> Coordinator
-    Flights -. weather + currency + toolbox flights .-> FT[ ]
+    Flights -. weather + local time + currency + toolbox flights .-> FT[ ]
     Hotels -. currency + RAG .-> HT[ ]
     Activities -. toolbox + RAG + itinerary skill .-> AT[ ]
 ```
@@ -56,57 +57,30 @@ graph TD
 - [Using workflows as agents](https://learn.microsoft.com/agent-framework/user-guide/workflows/workflows-as-agents)
 - [Agent-to-Agent (A2A) protocol in Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/journey/agent-to-agent)
 - [Connect to an A2A agent endpoint from Foundry Agent Service](https://learn.microsoft.com/azure/foundry/agents/how-to/tools/agent-to-agent)
+- [Agent Framework `handoff_workflow_as_agent.py` sample](https://github.com/microsoft/agent-framework/blob/main/python/samples/03-workflows/agents/handoff_workflow_as_agent.py) — the canonical handoff sample this step follows (a `HandoffBuilder` graph exposed through `workflow.as_agent()`).
 
 ## Steps
 
-### 1. Create three specialist config slices
+### 1. Read the specialist config slices
 
-Create one folder per specialist under `travel_assistant/agents/`. Each folder gets an `agent.yaml` and `agent.manifest.yaml` slice. These document the role and capability boundary — even though `coordinator.py` constructs the agents directly — so a reviewer can see at a glance what each specialist may touch.
+The per-specialist config slices are **already in the repo** — one folder per specialist under `travel_assistant/agents/`, delivered complete when you advanced. Each folder holds an `agent.yaml` (the role, `description`, and `instructions`) and an `agent.manifest.yaml` (the capability slice: `tools`, `rag`, `skills`). You don't edit them here — **open and read them**, because in the next section you translate each one into the code that builds that specialist.
 
 ```text
 travel_assistant/agents/
-├── flights/     { agent.yaml, agent.manifest.yaml }   # weather + currency + toolbox flights
+├── flights/     { agent.yaml, agent.manifest.yaml }   # weather + local time + currency + toolbox flights
 ├── hotels/      { agent.yaml, agent.manifest.yaml }   # currency + destinations RAG
 └── activities/  { agent.yaml, agent.manifest.yaml }   # toolbox + RAG + itinerary skill
 ```
 
-The Flights slice, for example:
+Reading them, notice the intended boundary of each specialist:
 
-```yaml
-# travel_assistant/agents/flights/agent.yaml
-kind: Prompt
-name: FlightsSpecialist
-displayName: Flights Specialist
-description: Handles flight timing, routing, airport, weather-risk, and currency questions.
-instructions: |
-  You are the Flights specialist for TravelBuddy.
-  Scope: compare flight timing, routing, airports, layovers, and arrival windows;
-  use flight search from the toolbox for specific routes (if no departure date is
-  given, call get_local_time and use the date part of its iso_time); use weather for
-  disruption risk and currency for fares.
-  Boundaries: do not choose hotels or activities. Hand back to the Coordinator when
-  the traveler asks about lodging, experiences, or the complete plan.
-```
+- **Flights** — the three function tools (`get_weather`, `get_local_time`, `convert_currency`) plus the toolbox (its flight search); no RAG, no skills.
+- **Hotels** — `convert_currency` plus the destinations index (RAG); it drops the toolbox.
+- **Activities** — the toolbox, the destinations index (RAG), **and** the itinerary (`travel-guide`) skill.
 
-```yaml
-# travel_assistant/agents/flights/agent.manifest.yaml
-name: flights-specialist
-version: 0.1.0
-description: Tool slice for the Flights specialist.
-tools:
-  - name: get_weather
-    source: travel_assistant.tools
-  - name: get_local_time
-    source: travel_assistant.tools
-  - name: convert_currency
-    source: travel_assistant.tools
-  - name: travel-toolbox
-    source: foundry-toolbox
-rag: []
-skills: []
-```
+Three small slices make each specialist's intended boundary explicit and easy to review — they're the architecture spec a teammate reads before touching the graph.
 
-The Hotels slice adds the destinations index (RAG) and drops the toolbox; the Activities slice adds the toolbox, RAG, **and** the itinerary skill. See [`.workshop/solutions/07-multi-agent/travel_assistant/agents/`](.workshop/solutions/07-multi-agent/travel_assistant/agents/) for all three. Three small slices make each specialist's intended boundary explicit and easy to review — they're the architecture spec a teammate reads before touching the graph.
+> **The Foundry skill is optional here.** The Activities `agent.manifest.yaml` also lists the Foundry `response-guardrails` skill carried from Step 6, and the checked-in **solution is the Foundry-enabled reference** — its `coordinator.py`, `ACTIVITIES_INSTRUCTIONS`, `.env.example`, and manifest all wire the skill in and treat it as required. If you built it in Step 6, keep it: carry the guardrails slice into your Activities specialist and add its "always use `response-guardrails`" line to `ACTIVITIES_INSTRUCTIONS`. If you **skipped** the Foundry skill (for example your Foundry project can't allow public network access — see Step 6), drop the `response-guardrails` entry from `agents/activities/agent.manifest.yaml`, leave `FOUNDRY_SKILL_NAMES` unset, and serve only the local `travel-guide` skill — carry your Step 6 *local-only* skills provider rather than the solution's Foundry-enabled `_build_skills_provider`. The local `travel-guide` skill still works and nothing else in this step depends on the Foundry skill. In practice, if you couldn't build the Foundry skill in Step 6 you already made your skills provider treat it as optional there — just carry that same local-only provider forward; there's nothing extra to redo here.
 
 > **These slices are documentation, not runtime config.** Nothing loads `agent.yaml`/`agent.manifest.yaml` at run time. In the next section `coordinator.py` builds each specialist directly in Python: the `instructions:` become string constants and the tool/RAG/skill slices become hand-written `tools=[...]` and `context_providers=[...]` arguments. The slices are the reviewable **contract**; `coordinator.py` is the executable **source of truth**. That means they can drift, so when a specialist behaves unexpectedly, inspect `coordinator.py` first — then realign the slice so the two agree.
 
@@ -116,75 +90,21 @@ The Coordinator is the only agent the traveler intentionally talks to. `coordina
 
 **Why every participant sets `require_per_service_call_history_persistence=True`.** Normally the framework only persists a completed request/response pair to conversation history. But a handoff fires *mid-turn*: the active agent calls a generated handoff tool, and control transfers to the next participant before that tool call resolves. With the default setting that in-flight, unresolved call would be dropped, leaving a gap the next participant can't reason over. The flag tells each agent to persist history on **every service call** — including the partial one interrupted by the handoff — so the receiving specialist sees the full context. `HandoffBuilder.build()` validates this and raises a `ValueError` if any participant is missing the flag, so set it on the Coordinator and all three specialists.
 
-```python
-# travel_assistant/coordinator.py
-from agent_framework import Agent, SkillsProvider
-from agent_framework.azure import AzureAISearchContextProvider
-from agent_framework.foundry import FoundryChatClient
-from agent_framework.orchestrations import HandoffBuilder
-from agent_framework_foundry_hosting import FoundryToolbox
-from azure.identity import DefaultAzureCredential
+**Now open `travel_assistant/coordinator.py` and fill in its `TODO`s using the slices you just read.** The scaffold constructs the `Coordinator` and imports the essentials; as you carry your Step 5 RAG and Step 6 skills providers over, add any imports they need (for example `Path`, your skills-provider type). You supply:
 
-from tools import convert_currency, get_local_time, get_weather
-# ... run_local_skill_script carried from Step 6 lives here too ...
+- the three **specialist** instruction constants (`FLIGHTS_`, `HOTELS_`, `ACTIVITIES_INSTRUCTIONS`) — copy each specialist's `instructions:` block from its `agents/<name>/agent.yaml`;
+- the **`COORDINATOR_INSTRUCTIONS`** constant — there's no Coordinator slice, so you write this one. It's the router's brief; make it cover:
+  - **Role:** you are TravelBuddy's Coordinator — understand the request, route work to the right specialist, and synthesize a single clear answer.
+  - **Routing rules,** one line per specialist, matching each slice's `description`: Flights → timing, airports, routes, layovers, weather risk, fares; Hotels → lodging areas, budgets, amenities, neighbourhood trade-offs; Activities → experiences, day trips, destination guidance, day-by-day itineraries.
+  - **Full-trip behaviour:** for a complete plan, hand off to each relevant specialist in turn, then reconcile their answers into one plan.
+  - **Conversation etiquette:** ask a clarifying question only when a missing detail blocks the next useful step, and let the traveler know when you're routing to a specialist.
+- the carried `search` RAG provider (from Step 5) and the `skills` provider (from Step 6);
+- the three specialist `Agent(...)`s — translate each `agents/<name>/agent.manifest.yaml` slice into `tools=[...]` and `context_providers=[...]` (function tools + toolbox → `tools`; `rag` → `search`; `skills` → the skills provider);
+- the `HandoffBuilder` graph, returned via `workflow.as_agent()`.
 
+Set `require_per_service_call_history_persistence=True` on the Coordinator **and** all three specialists (see the callout above), or `build()` will raise.
 
-def build_travel_coordinator() -> Agent:
-    credential = DefaultAzureCredential()
-    client = FoundryChatClient(
-        project_endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
-        model=os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
-        credential=credential,
-    )
-
-    # Carried capabilities, sliced per specialist below.
-    toolbox = FoundryToolbox(credential)
-    search = _build_search_provider(credential)   # AzureAISearchContextProvider
-    skills = SkillsProvider.from_paths(
-        skill_paths=Path(__file__).parent / "skills",
-        script_runner=run_local_skill_script,
-    )
-
-    coordinator = Agent(
-        client=client, name="Coordinator", instructions=COORDINATOR_INSTRUCTIONS,
-        require_per_service_call_history_persistence=True,
-    )
-
-    flights = Agent(
-        client=client, name="FlightsSpecialist", instructions=FLIGHTS_INSTRUCTIONS,
-        tools=[get_weather, get_local_time, convert_currency, toolbox],
-        require_per_service_call_history_persistence=True,
-    )
-    hotels = Agent(
-        client=client, name="HotelsSpecialist", instructions=HOTELS_INSTRUCTIONS,
-        tools=[convert_currency],
-        context_providers=[search],
-        require_per_service_call_history_persistence=True,
-    )
-    activities = Agent(
-        client=client, name="ActivitiesSpecialist", instructions=ACTIVITIES_INSTRUCTIONS,
-        tools=[toolbox],
-        context_providers=[search, skills],
-        require_per_service_call_history_persistence=True,
-    )
-
-    workflow = (
-        HandoffBuilder(
-            name="travelbuddy-runtime-handoff",
-            participants=[coordinator, flights, hotels, activities],
-        )
-        .with_start_agent(coordinator)
-        .add_handoff(coordinator, [flights, hotels, activities])
-        .add_handoff(flights, [coordinator])
-        .add_handoff(hotels, [coordinator])
-        .add_handoff(activities, [coordinator])
-        .build()
-    )
-
-    return workflow.as_agent()
-```
-
-The key lines are the graph edges:
+The graph edges are what make this a handoff rather than a fixed pipeline:
 
 - `with_start_agent(coordinator)` sends each new user request to the Coordinator first.
 - `add_handoff(coordinator, [flights, hotels, activities])` lets the Coordinator pick a specialist.
@@ -195,27 +115,16 @@ Because the toolbox is one bundle (web search + Code Interpreter + OctoTrip flig
 
 ### 3. Point `main.py` at the Coordinator
 
-`main.py` collapses to constructing the Coordinator and hosting it through the same adapter as before:
+`main.py` collapses to constructing the Coordinator and hosting it through the same adapter as before. Edit your existing `travel_assistant/main.py` in place:
 
-```python
-# travel_assistant/main.py
-from agent_framework_foundry_hosting import ResponsesHostServer
+- **Import** `build_travel_coordinator` from `coordinator` (instead of your Step 6 agent builder).
+- In `main()`, **build the agent** with `agent = build_travel_coordinator()` — the handoff graph, exposed as one agent — and host it with `ResponsesHostServer(agent).run()`, exactly as before.
 
-from coordinator import build_travel_coordinator
-
-
-def main() -> None:
-    agent = build_travel_coordinator()   # the handoff graph, exposed as one agent
-    ResponsesHostServer(agent).run()
-
-
-if __name__ == "__main__":
-    main()
-```
+Everything else in `main.py` is unchanged. If you moved the `run_local_skill_script` runner and the skill-download helpers into `coordinator.py`, delete their now-unused copies from `main.py`.
 
 ### 4. Update the manifest
 
-Metadata-only: append the `Multi-Agent` tag, update the `description`, and add a `handoff` block naming the coordinator + specialists. No new `template.environment_variables`; `resources` stays `[]`.
+Metadata-only: append the `Multi-Agent` tag to your existing `tags` (if you kept the Foundry skill you'll also already have `Foundry Skills` from Step 6), update the `description`, and add a `handoff` block naming the coordinator + specialists. No new `template.environment_variables`; `resources` stays `[]`.
 
 ```yaml
 # travel_assistant/agent.manifest.yaml (delta)
