@@ -1,14 +1,10 @@
 name: activities-specialist
 version: 0.1.0
-description: Tool, RAG, and skill slice for the Activities specialist.
+description: Tool and RAG slice for the Activities specialist.
 tools:
   - name: travel-toolbox
     source: foundry-toolbox
 rag:
   - name: destinations-index
     source: azure-ai-search
-skills:
-  - name: travel-guide
-    source: travel_assistant.skills.travel-guide
-  - name: response-guardrails
-    source: foundry
+skills: []

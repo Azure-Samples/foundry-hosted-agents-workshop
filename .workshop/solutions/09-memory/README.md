@@ -10,7 +10,7 @@ Builds on Step 8: the same durable workflow (gather → specialists → consolid
 
 - `travel_assistant/` — the agent code.
   - `coordinator.py` — Step 8 factories **plus** `_build_memory_provider()`; `make_client` now passes `allow_preview=True` so `client.project_client` can reach the preview memory API. Each specialist appends the memory provider to its `context_providers`.
-  - `coordinator.py`'s `create_activities_agent` downloads the required Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider`.
+  - `coordinator.py`'s `_build_skills_provider` downloads the required Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider`; `workflow.py` attaches it to the `finalize_itinerary` step.
   - `workflow.py`, `main.py` — carried from Step 8, unchanged.
   - `provision_memory_store.py` — one-time, out-of-band creation of the memory store.
   - `agents/`, `tools.py`, `skills/`, `data/` — carried from Steps 4–8.

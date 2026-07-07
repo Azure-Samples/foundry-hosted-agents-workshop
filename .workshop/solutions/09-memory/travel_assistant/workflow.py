@@ -20,6 +20,7 @@ from agent_framework import (
 from dotenv import load_dotenv
 
 from coordinator import (
+    _build_skills_provider,
     create_activities_agent,
     create_flights_agent,
     create_hotels_agent,
@@ -52,7 +53,10 @@ class ApprovalRequest:
 FINALIZE_INSTRUCTIONS = (
     "You write the final travel itinerary from an approved draft. Merge the flight, "
     "hotel, and activity sections into one concise, actionable plan. Do not invent "
-    "bookings; clearly mark any assumptions."
+    "bookings; clearly mark any assumptions.\n"
+    "You own the final deliverable and its safety, just like the Step 7 Coordinator:\n"
+    "- Always use the travel-guide skill to turn the plan into a downloadable, shareable PDF trip guide.\n"
+    "- Always apply the response-guardrails skill to your answer before you return it."
 )
 
 
@@ -203,7 +207,14 @@ def build_workflow(require_approval: bool = False):
     hotels = AgentExecutor(create_hotels_agent(client), id="hotels", context_mode="last_agent")
     activities = AgentExecutor(create_activities_agent(client), id="activities", context_mode="last_agent")
 
-    finalize_agent = Agent(client=client, name="finalize_itinerary", instructions=FINALIZE_INSTRUCTIONS)
+    # The finalize agent owns the deliverable: travel-guide (PDF) + response-guardrails.
+    finalize_agent = Agent(
+        client=client,
+        name="finalize_itinerary",
+        instructions=FINALIZE_INSTRUCTIONS,
+        context_providers=[_build_skills_provider()],
+        default_options={"store": False},
+    )
     finalize = AgentExecutor(finalize_agent, id="finalize_itinerary", context_mode="last_agent")
 
     gather = GatherPreferences()

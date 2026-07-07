@@ -6,7 +6,7 @@ Builds on Step 6: keeps every carried capability (function tools, Foundry Toolbo
 
 ## Layout
 
-- `travel_assistant/` — the agent code. `coordinator.py` builds the handoff graph and each specialist gets a sliced capability set; it also downloads the Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider`. `agents/{flights,hotels,activities}/` hold per-specialist `agent.yaml` + `agent.manifest.yaml` slices that document each role's tool/RAG/skill boundary. Snapshotted by `azd ai agent init`.
+- `travel_assistant/` — the agent code. `coordinator.py` builds the handoff graph and each specialist gets a sliced capability set; the Coordinator downloads the Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider`. `agents/{flights,hotels,activities}/` hold per-specialist `agent.yaml` + `agent.manifest.yaml` slices that document each role's tool/RAG/skill boundary. Snapshotted by `azd ai agent init`.
 - `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` (from Step 5).
 - `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/` (from Step 6). Never deployed — `azd ai agent init` snapshots only `travel_assistant/`.
 - `travel_toolbox/` — the toolbox definition (`toolbox.yaml`).
@@ -16,10 +16,10 @@ Builds on Step 6: keeps every carried capability (function tools, Foundry Toolbo
 
 | Specialist | Tools | RAG | Skill |
 | --- | --- | --- | --- |
-| Coordinator | — | — | — |
-| Flights | `get_weather`, `convert_currency`, toolbox (flight search) | — | — |
-| Hotels | `convert_currency` | destinations index | — |
-| Activities | toolbox (web/reference) | destinations index | travel-guide, response-guardrails |
+| Coordinator | — | — | travel-guide, response-guardrails |
+| Flights | `get_weather`, `get_local_time`, `convert_currency`, toolbox (flight fares) | — | — |
+| Hotels | `convert_currency`, toolbox (web) | destinations index | — |
+| Activities | toolbox (web/reference) | destinations index | — |
 
 ## Run it
 
