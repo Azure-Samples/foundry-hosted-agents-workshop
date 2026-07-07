@@ -40,11 +40,12 @@ from tools import convert_currency, get_local_time, get_weather
 load_dotenv(override=True)
 
 # TODO: carry run_local_skill_script over from your Step 6 main.py so the
-# Activities specialist can run the local travel-guide skill, and build the
-# SkillsProvider that serves it. If you built the Foundry response-guardrails
-# skill in Step 6, serve it here too (as the activities slice lists); if you
-# skipped it (no public-network Foundry project), serve only the local skill
-# and drop response-guardrails from the activities slice + ACTIVITIES_INSTRUCTIONS.
+# Coordinator can run the local travel-guide skill (it renders the final PDF trip
+# guide), and build the SkillsProvider that serves it. If you built the Foundry
+# response-guardrails skill in Step 6, serve it here too so the Coordinator can
+# guardrail its final answer; if you skipped it (no public-network Foundry
+# project), serve only the local skill and drop the response-guardrails line from
+# COORDINATOR_INSTRUCTIONS.
 
 
 # --- Instruction constants --------------------------------------------------
@@ -59,12 +60,19 @@ load_dotenv(override=True)
 #       Hotels  -> lodging areas, budgets, amenities, neighbourhood trade-offs
 #       Activities -> experiences, day trips, destination guidance, itineraries
 #   - Full trip: hand off to each relevant specialist, then reconcile into one plan.
+#   - Final deliverable (you own it): always use the travel-guide skill to render
+#     the plan as a downloadable PDF, and always apply the response-guardrails
+#     skill to your answer before returning it (drop that line if you skipped the
+#     Foundry skill in Step 6).
+#   - You are the only agent who talks to the traveler: when a specialist hands
+#     back because a detail is missing, ask the traveler yourself rather than
+#     routing straight back to that specialist (which can loop).
 #   - Ask a clarifying question only when a missing detail blocks the next step;
 #     keep the traveler informed when routing.
 COORDINATOR_INSTRUCTIONS = ""
 FLIGHTS_INSTRUCTIONS = ""      # TODO: from agents/flights/agent.yaml — flights only; hand back for lodging/activities/full plan.
-HOTELS_INSTRUCTIONS = ""       # TODO: from agents/hotels/agent.yaml — lodging only; use destinations RAG + currency.
-ACTIVITIES_INSTRUCTIONS = ""   # TODO: from agents/activities/agent.yaml — experiences, day trips, itinerary; toolbox + RAG + travel-guide skill.
+HOTELS_INSTRUCTIONS = ""       # TODO: from agents/hotels/agent.yaml — lodging only; use destinations RAG + toolbox web search + currency.
+ACTIVITIES_INSTRUCTIONS = ""   # TODO: from agents/activities/agent.yaml — experiences, day trips, itinerary; toolbox web search + destinations RAG.
 
 
 def _build_search_provider(credential) -> AzureAISearchContextProvider:
@@ -88,52 +96,59 @@ def build_travel_coordinator() -> Agent:
     search = _build_search_provider(credential)
     # TODO: build the skills provider from your Step 6 code (local travel-guide,
     # plus the Foundry response-guardrails skill only if you built it in Step 6).
+    # It belongs to the Coordinator now — it owns the final PDF guide + guardrails.
     # skills = ...
 
     # Every participant MUST set require_per_service_call_history_persistence=True.
     # A handoff fires mid-turn (before the handoff tool call resolves), so without
     # the flag that in-flight call is dropped and HandoffBuilder.build() raises
     # ValueError. Set it on the Coordinator and all three specialists.
+    # Carry default_options={"store": False} over from every earlier step: the
+    # hosting layer manages history, so don't persist responses server-side. Set
+    # it on the Coordinator and all three specialists below.
+    # TODO: once you build the skills provider above, attach it to the Coordinator
+    # with context_providers=[skills] — the Coordinator owns the final PDF guide
+    # and the response-guardrails check.
     coordinator = Agent(
         client=client,
         name="Coordinator",
         instructions=COORDINATOR_INSTRUCTIONS,
         require_per_service_call_history_persistence=True,
+        default_options={"store": False},
     )
 
     # TODO: build the three specialists. Read each agents/<name>/agent.manifest.yaml
     # to see the exact capability slice, then translate it to Agent(...) arguments:
     #   - `tools:`  -> tools=[...]              (function tools + the toolbox)
     #   - `rag:`    -> context_providers=[search]   (the destinations index)
-    #   - `skills:` -> add `skills` to context_providers
+    #   (the travel-guide / response-guardrails skills are the Coordinator's, above)
     # e.g.:
     #   flights = Agent(
     #       client=client, name="FlightsSpecialist", instructions=FLIGHTS_INSTRUCTIONS,
     #       tools=[get_weather, get_local_time, convert_currency, toolbox],
     #       require_per_service_call_history_persistence=True,
+    #       default_options={"store": False},
     #   )
-    #   hotels = Agent(... tools=[convert_currency], context_providers=[search] ...)
-    #   activities = Agent(... tools=[toolbox], context_providers=[search, skills] ...)
+    #   hotels = Agent(... tools=[convert_currency, toolbox], context_providers=[search],
+    #                  require_per_service_call_history_persistence=True,
+    #                  default_options={"store": False})
+    #   activities = Agent(... tools=[toolbox], context_providers=[search],
+    #                      require_per_service_call_history_persistence=True,
+    #                      default_options={"store": False})
 
-    # TODO: wire the handoff graph and expose it as a single agent:
-    #   workflow = (
-    #       HandoffBuilder(
-    #           name="travelbuddy-runtime-handoff",
-    #           participants=[coordinator, flights, hotels, activities],
-    #       )
-    #       .with_start_agent(coordinator)
-    #       .add_handoff(coordinator, [flights, hotels, activities])
-    #       .add_handoff(flights, [coordinator])
-    #       .add_handoff(hotels, [coordinator])
-    #       .add_handoff(activities, [coordinator])
-    #       .build()
-    #   )
-    #   return workflow.as_agent()
-    raise NotImplementedError(
-        "TODO: build the specialists and handoff graph per docs/steps/07-multi-agent.md"
+    # The handoff graph is wired for you and exposed as a single agent. It refers
+    # to flights/hotels/activities, so define those three specialists above first
+    # (and fill in _build_search_provider) before this runs.
+    workflow = (
+        HandoffBuilder(
+            name="travelbuddy-runtime-handoff",
+            participants=[coordinator, flights, hotels, activities],
+        )
+        .with_start_agent(coordinator)
+        .add_handoff(coordinator, [flights, hotels, activities])
+        .add_handoff(flights, [coordinator])
+        .add_handoff(hotels, [coordinator])
+        .add_handoff(activities, [coordinator])
+        .build()
     )
-
-
-async def run_once(prompt: str):
-    coordinator = build_travel_coordinator()
-    return await coordinator.run(prompt)
+    return workflow.as_agent()

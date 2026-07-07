@@ -11,7 +11,7 @@ Builds on Step 7: the same Flights / Hotels / Activities specialists are reused 
 - `travel_assistant/` — the agent code.
   - `coordinator.py` — Step 7 handoff **plus** the extracted specialist factories (`create_flights_agent`, `create_hotels_agent`, `create_activities_agent`, `make_client`) that both the coordinator and the workflow now share.
   - `workflow.py` — the executors (`GatherPreferences`, `Consolidate`, `ApprovalGate`), the `WorkflowBuilder` graph, checkpointing, and `build_workflow_agent()`.
-  - `coordinator.py`'s `create_activities_agent` downloads the required Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider`.
+  - `coordinator.py`'s `_build_skills_provider` downloads the required Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider`; `workflow.py` attaches it to the `finalize_itinerary` step.
   - `main.py` — hosts `build_workflow_agent()`.
   - `agents/`, `tools.py`, `skills/`, `data/` — carried from Steps 4–7.
 - `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` (from Step 5).

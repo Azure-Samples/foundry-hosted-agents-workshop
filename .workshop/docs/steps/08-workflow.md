@@ -81,15 +81,15 @@ def create_flights_agent(client, credential=None) -> Agent:
         tools=[get_weather, get_local_time, convert_currency, toolbox], default_options={"store": False},
     )
 
-# create_hotels_agent (currency + RAG) and create_activities_agent
-# (toolbox + RAG + itinerary skill) follow the same pattern.
+# create_hotels_agent (currency + toolbox web + RAG) and
+# create_activities_agent (toolbox web + RAG) follow the same pattern.
 ```
 
 The point is a **single source of truth**: the runtime Coordinator and the workflow now build identical specialists.
 
 ### 2. Create `travel_assistant/workflow.py`
 
-The workflow has three custom executors plus agent nodes. `GatherPreferences` fans the request out to all three specialists; `Consolidate` aggregates their answers, checkpoints the draft, then sends the finalize prompt; `finalize_itinerary` is an `AgentExecutor` that writes the plan.
+The workflow has three custom executors plus agent nodes. `GatherPreferences` fans the request out to all three specialists; `Consolidate` aggregates their answers, checkpoints the draft, then sends the finalize prompt; `finalize_itinerary` is an `AgentExecutor` that writes the plan and — taking over the Step 7 Coordinator's role — owns the final deliverable, using the `travel-guide` skill to render the shareable PDF and the `response-guardrails` skill to check the answer.
 
 ```python
 # travel_assistant/workflow.py
@@ -100,6 +100,7 @@ from agent_framework import (
 )
 
 from coordinator import (
+    _build_skills_provider,
     create_activities_agent, create_flights_agent, create_hotels_agent, make_client,
 )
 
@@ -170,7 +171,11 @@ def build_workflow(require_approval: bool = False):
     hotels = AgentExecutor(create_hotels_agent(client), id="hotels", context_mode="last_agent")
     activities = AgentExecutor(create_activities_agent(client), id="activities", context_mode="last_agent")
     finalize = AgentExecutor(
-        Agent(client=client, name="finalize_itinerary", instructions=FINALIZE_INSTRUCTIONS),
+        Agent(
+            client=client, name="finalize_itinerary", instructions=FINALIZE_INSTRUCTIONS,
+            context_providers=[_build_skills_provider()],  # travel-guide PDF + response-guardrails
+            default_options={"store": False},
+        ),
         id="finalize_itinerary", context_mode="last_agent",
     )
     gather, consolidate = GatherPreferences(), Consolidate()
@@ -201,6 +206,8 @@ def build_workflow_agent(require_approval: bool = False) -> Agent:
 ```
 
 Do **not** copy the specialist prompts into `workflow.py` — import the factories so Steps 7 and 8 stay aligned.
+
+> **Skipped the Foundry skill?** The finalize step inherits the Step 7 rule: if you left `FOUNDRY_SKILL_NAMES` unset, carry your local-only skills provider here instead of the solution's `_build_skills_provider`, and drop the `response-guardrails` line from `FINALIZE_INSTRUCTIONS`. The local `travel-guide` skill still renders the PDF.
 
 ### 3. Point `main.py` at the workflow
 

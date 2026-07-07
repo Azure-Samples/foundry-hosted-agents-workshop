@@ -29,7 +29,7 @@ A conversation already has **in-conversation context** — the messages still in
 
 **Scope is the key design detail.** Memories are partitioned by a scope string. Store under one scope and read under another and recall silently fails. For a hosted agent the correct scope is the special placeholder `scope="{{$userId}}"`, which the hosting runtime replaces with the authenticated caller's user id — so every traveler automatically gets their own isolated memories. (In a purely local script you would instead pass a stable id you control.)
 
-**Where memory attaches.** We add the provider inside the Step 8 specialist factories, so the workflow's `flights` / `hotels` / `activities` executors all become memory-aware. The graph, checkpoints, hosting, and `workflow.as_agent()` are untouched — memory rides along as context.
+**Where memory attaches.** We add the provider inside the Step 8 specialist factories, so the workflow's `flights` / `hotels` / `activities` executors all become memory-aware. The `finalize_itinerary` step is deliberately left out: the specialists already fold each traveler's recalled preferences into the draft, so finalize only has to render and guardrail the consolidated answer — it needs the skills, not per-user recall. The graph, checkpoints, hosting, and `workflow.as_agent()` are untouched — memory rides along as context.
 
 ```mermaid
 flowchart LR
@@ -134,23 +134,24 @@ def _build_memory_provider(client: FoundryChatClient) -> FoundryMemoryProvider:
 
 `update_delay` is the debounce before the store extracts and persists new facts. It **defaults to 300 seconds (5 minutes)**, which batches writes to reduce cost in production. For the workshop we set `update_delay=0` so a fact you state in one turn is recallable on the next; leave the default (or raise it) in a real deployment.
 
-Each factory builds the provider from its `client` and appends it — keeping every carried-over tool, toolbox, RAG, and skill:
+Each factory builds the provider from its `client` and appends it — keeping every carried-over tool, toolbox, and RAG:
 
 ```python
 # travel_assistant/coordinator.py (delta)
 def create_hotels_agent(client, credential=None) -> Agent:
     credential = credential or DefaultAzureCredential()
+    toolbox = FoundryToolbox(credential)
     search = _build_search_provider(credential)
     memory = _build_memory_provider(client)                       # NEW
     return Agent(
         client=client, name="HotelsSpecialist", instructions=HOTELS_INSTRUCTIONS,
-        tools=[convert_currency],
+        tools=[convert_currency, toolbox],
         context_providers=[search, memory],  # + memory
         default_options={"store": False},
     )
 ```
 
-`create_flights_agent` gains `context_providers=[memory]` (its first provider); `create_activities_agent` becomes `[search, skills, memory]`. Reading `MEMORY_STORE_NAME` with `os.environ["..."]` makes memory a required capability — a missing value fails fast with a clear `KeyError` instead of silently starting without recall.
+`create_flights_agent` gains `context_providers=[memory]` (its first provider); `create_activities_agent` becomes `[search, memory]`. Reading `MEMORY_STORE_NAME` with `os.environ["..."]` makes memory a required capability — a missing value fails fast with a clear `KeyError` instead of silently starting without recall.
 
 Reusing `client.project_client` (instead of constructing a second `AIProjectClient`) keeps a single authentication context, and putting memory in the factories means the runtime Coordinator (Step 7) and the hosted workflow (Step 8) both pick it up from one source of truth. `main.py` and `workflow.py` need **no** changes.
 
