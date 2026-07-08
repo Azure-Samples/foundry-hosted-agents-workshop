@@ -23,6 +23,12 @@ on:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    # Only run on the canonical template repository. Repos created from this
+    # template ("Use this template") don't have code scanning enabled, so
+    # CodeQL's upload would fail and crash the branch. Matching the source repo
+    # by name works across all triggers, including `schedule` where
+    # github.event.repository isn't populated.
+    if: github.repository == 'Azure-Samples/foundry-hosted-agents-workshop'
     # Runner size impacts CodeQL analysis time. To learn more, please see:
     #   - https://gh.io/recommended-hardware-resources-for-running-codeql
     #   - https://gh.io/supported-runners-and-hardware-resources
