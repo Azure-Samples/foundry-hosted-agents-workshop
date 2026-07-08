@@ -147,8 +147,6 @@ You can run and deploy TravelBuddy two ways: with the [**Azure Developer CLI** (
 
 ### Option 1 — Azure Developer CLI (`azd`)
 
-> Run `azd ai agent init` from the **repository root** (so the `-m travel_assistant/…` path resolves). It creates a project folder named after your agent (`${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`); run the remaining `azd` commands (`env set`, `provision`, `ai agent run`, `deploy`) from **inside that folder**.
-
 1. **Scaffold `azure.yaml` and `infra/`** from the manifest (one-time per workshop):
 
    Load your `.env` into the shell first (the repo `.env` isn't auto-loaded — only Python's `load_dotenv()` and azd's YAML templating read it), then pass the expanded prefix to `--agent-name`:
