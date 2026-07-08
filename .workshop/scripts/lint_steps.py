@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import posixpath
 import re
 import sys
 from dataclasses import asdict, dataclass
@@ -12,7 +13,16 @@ from typing import Sequence
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from render_readme import FINAL_STEP, STEP_TITLES, parse_step_marker, render
+from render_readme import (
+    FINAL_STEP,
+    PARTIALS_BASE,
+    STEP_TITLES,
+    STEPS_BASE,
+    _LINK_RE,
+    parse_step_marker,
+    render,
+    resolve_relative_target,
+)
 
 SCRIPT_DIR = Path(__file__).parent
 # This script lives at .workshop/scripts/, so the repo root is two levels up and
@@ -149,6 +159,53 @@ def _scan_stray_placeholders() -> list[str]:
                 issues.append(f"{_relative(path)}:{line_number}")
 
     return issues
+
+
+def _source_link_failures() -> list[str]:
+    """Flag relative links/images in source docs that break when viewed directly.
+
+    Source step docs and partials must author relative links/images *relative to
+    their own folder* so they resolve when the file is browsed directly on GitHub
+    (the renderer rebases them to repo-root-relative for ``README.md``). A link is
+    a failure when, interpreted that way, its target does not exist — either
+    because it was authored root-relative (the old convention) or because the
+    target is simply missing (e.g. a stale image path).
+    """
+
+    failures: list[str] = []
+    scan = [
+        (WORKSHOP_DIR / "docs" / "steps", STEPS_BASE),
+        (WORKSHOP_DIR / "docs" / "partials", PARTIALS_BASE),
+    ]
+
+    for directory, base in scan:
+        if not directory.exists():
+            continue
+
+        for path in sorted(directory.glob("*.md")):
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for line_number, line in enumerate(lines, start=1):
+                for match in _LINK_RE.finditer(line):
+                    url = match.group("url")
+                    target = resolve_relative_target(url, base)
+                    if target is None or (REPO_ROOT / target).exists():
+                        continue
+
+                    location = f"{_relative(path)}:{line_number}"
+                    root_target = posixpath.normpath(url.partition("#")[0])
+                    if (REPO_ROOT / root_target).exists():
+                        failures.append(
+                            f"{location}: root-relative link '{url}' — author it "
+                            "source-relative (source docs resolve links from the "
+                            "doc's own folder when viewed on GitHub)"
+                        )
+                    else:
+                        failures.append(
+                            f"{location}: broken link '{url}' — target not found "
+                            f"(resolved to '{target}')"
+                        )
+
+    return failures
 
 
 def _add_result(
@@ -331,6 +388,15 @@ def run_checks() -> tuple[list[CheckResult], list[str]]:
         "No stray {{OWNER}} or {{REPO}} placeholders",
         [f"stray placeholder at {issue}" for issue in stray_placeholders],
         "no stray owner/repo placeholders outside GitHub URLs",
+    )
+
+    link_failures = _source_link_failures()
+    _add_result(
+        results,
+        "K",
+        "Source-doc relative links resolve (source-relative, no broken targets)",
+        link_failures,
+        "source-doc relative links/images resolve from the doc's own folder",
     )
 
     return results, warnings

@@ -15,6 +15,6 @@ From Step {{NEXT_STEP_NUMBER}} onward you don't click a button to advance — yo
 
 > 💡 **Button returns 404?** Your repo's one-time **Initialize workshop** Action hasn't run yet. Open the **Actions** tab, run **Initialize workshop → Run workflow**, then refresh this page.
 
-> **Prefer to stay local?** Run `python .workshop/scripts/advance_step.py --expected-current-step {{CURRENT_STEP}} --auto-commit` (or `make advance`) instead of clicking the button. See [Working fully locally](.workshop/docs/steps/00-intro.md#5-working-fully-locally-no-github-actions) for the full local flow.
+> **Prefer to stay local?** Run `python .workshop/scripts/advance_step.py --expected-current-step {{CURRENT_STEP}} --auto-commit` (or `make advance`) instead of clicking the button. See [Working fully locally](../steps/00-intro.md#5-working-fully-locally-no-github-actions) for the full local flow.
 
 <sub>Made a mistake? Use the [Reset workshop](https://github.com/{{OWNER}}/{{REPO}}/actions/workflows/reset-workshop.yml) workflow, or run `python .workshop/scripts/advance_step.py --reset --auto-commit` locally.</sub>

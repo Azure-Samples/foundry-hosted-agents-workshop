@@ -388,7 +388,7 @@ Hosted workflow-agents surface `request_info` as a **function call**, not a prom
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/08-workflow/`](.workshop/solutions/08-workflow/)
+> If you get stuck: [`.workshop/solutions/08-workflow/`](../../solutions/08-workflow/)
 
 ## Upstream sample
 

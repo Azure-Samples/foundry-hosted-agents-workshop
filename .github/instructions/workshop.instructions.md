@@ -45,18 +45,22 @@ and `python -m pytest .workshop/scripts/tests`.
   add them to later `.workshop/step_files/NN`.
 - **Keep it teaching-quality.** Never minify code in `.workshop/step_files/` or
   `.workshop/solutions/` — keep it clean and expanded (KISS).
-- **Links and images in step docs are repo-root-relative.** Step docs render
-  into the participant's **root** `README.md`, so author relative links and
-  image paths as they resolve *from the repo root* — e.g.
-  `.workshop/docs/assets/NN-*.png` and `.workshop/solutions/NN-*/`, not
-  `docs/assets/...` or `../assets/...`. Consequence: viewing a source step doc
-  directly on GitHub (under `.workshop/docs/steps/`) shows those relative links
-  as broken — that is expected; the **rendered `README.md` is the canonical
-  artifact**. For links that must leave the docs, use absolute URLs:
-  `https://github.com/{{OWNER}}/{{REPO}}/...` when the link must target the
-  participant's **own** instance (e.g. their Actions workflows), and a hardcoded
-  `https://github.com/Azure-Samples/foundry-hosted-agents-workshop/...` when it must reach
-  the **template/upstream** repo (e.g. the workshop-feedback issue template).
+- **Links and images in step docs and partials are source-relative.** Author
+  relative links and image paths **relative to the folder the source file lives
+  in**, so they resolve when the file is viewed directly on GitHub. From a step
+  doc under `.workshop/docs/steps/`, that means `../assets/NN-*.png`,
+  `../../solutions/NN-*/`, and `NN-intro.md#anchor` for a sibling step; from a
+  partial under `.workshop/docs/partials/`, use `../steps/00-intro.md#anchor`.
+  The renderer (`render_readme.py`) rebases these to repo-root-relative when it
+  inlines them into the root `README.md`, so both the source doc and the rendered
+  README have working links. `lint_steps.py` check **K** rejects root-relative
+  links and any link/image whose target doesn't exist. For links that must leave
+  the docs, use absolute URLs: `https://github.com/{{OWNER}}/{{REPO}}/...` when
+  the link must target the participant's **own** instance (e.g. their Actions
+  workflows), and a hardcoded
+  `https://github.com/Azure-Samples/foundry-hosted-agents-workshop/...` when it
+  must reach the **template/upstream** repo (e.g. the workshop-feedback issue
+  template).
 
 ## Before you open a PR
 

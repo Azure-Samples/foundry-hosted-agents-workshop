@@ -330,7 +330,7 @@ resources: []
 
    Prefer a UI? Open the **Hosted Agent Playground** from the Foundry Toolkit (**Developer Tools** → **Build** → **Hosted Agent Playground**), pick your deployed agent and version, and ask for a guide — the generated PDF shows up under **Session Details → Files**.
 
-   ![Foundry Toolkit Hosted Agent Playground with the deployed TravelBuddy agent, showing the run_skill_script tool call and the generated reykjavik-3-day-travel-guide.pdf listed under Session Details → Files](.workshop/docs/assets/06-travel-guide-skill-playground.png)
+   ![Foundry Toolkit Hosted Agent Playground with the deployed TravelBuddy agent, showing the run_skill_script tool call and the generated reykjavik-3-day-travel-guide.pdf listed under Session Details → Files](../assets/06-travel-guide-skill-playground.png)
 
 ---
 
@@ -404,7 +404,7 @@ It prints the uploaded skill's version and `skill_id`, then confirms the project
 
 Prefer a UI? Open the Foundry Toolkit and select your project under **My Resources → Tools → Skills** — the uploaded `response-guardrails` skill appears there with its version and description.
 
-![Foundry Toolkit Skills tab under My Resources → Tools, listing the uploaded response-guardrails skill with its Responsible-AI description and version v1](.workshop/docs/assets/06-foundry-skill-provisioned.png)
+![Foundry Toolkit Skills tab under My Resources → Tools, listing the uploaded response-guardrails skill with its Responsible-AI description and version v1](../assets/06-foundry-skill-provisioned.png)
 
 ### B2. Add the download and extend the provider in `main.py`
 
@@ -727,7 +727,7 @@ That folder is a **runtime cache** in the OS temp dir — `main.py` deletes and 
 
 ## Solution
 
-- [`.workshop/solutions/06-skills/`](.workshop/solutions/06-skills/) — the local skill **and** the required Foundry skill, with `foundry_skills/` as a sibling of `travel_assistant/`.
+- [`.workshop/solutions/06-skills/`](../../solutions/06-skills/) — the local skill **and** the required Foundry skill, with `foundry_skills/` as a sibling of `travel_assistant/`.
 
 ## Upstream sample
 

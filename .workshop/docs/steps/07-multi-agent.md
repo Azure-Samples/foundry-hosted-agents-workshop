@@ -223,7 +223,7 @@ Keep import names aligned with the files you created in Steps 5–6. `coordinato
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/07-multi-agent/`](.workshop/solutions/07-multi-agent/)
+> If you get stuck: [`.workshop/solutions/07-multi-agent/`](../../solutions/07-multi-agent/)
 
 ## Upstream sample
 
