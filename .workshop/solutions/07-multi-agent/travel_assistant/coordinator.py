@@ -35,21 +35,24 @@ load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
 
-# The Coordinator owns the final deliverable: the LOCAL travel-guide skill (always
-# present) renders the PDF trip guide, and the FOUNDRY response-guardrails skill
-# checks the final answer. If you skipped the Foundry skill in Step 6, drop the
-# response-guardrails line below — see the Step 7 doc callout.
+# The Coordinator is a pure router/synthesizer: in a runtime handoff it issues the
+# handoff tool calls and is re-invoked after each hand-back, so it CANNOT also carry a
+# tool-producing context provider (the skills provider). Unlike Steps 1-6 this
+# Coordinator has no tools and no context providers.
+# In a runtime handoff it is the only participant invoked twice (route, then synthesize
+# after a hand-back), so attaching a tool-producing context provider here (the skills
+# provider) breaks the store=False history replay on that second call
+# ("No tool call found for function call output"). The final deliverable — the
+# travel-guide PDF and the response-guardrails check — therefore rides on the Activities
+# specialist (a leaf, invoked once). Step 8's workflow adds a dedicated finalize node
+# that CAN own the deliverable. See the Step 7 doc for the full explanation.
 COORDINATOR_INSTRUCTIONS = """You are TravelBuddy's Coordinator. Understand the traveler's request, route specialist work to the right agent, and synthesize a clear final answer.
 
 Routing:
 - FlightsSpecialist: flight timing, airports, routes, layovers, weather risk, arrival windows, and fare-related currency questions.
 - HotelsSpecialist: lodging areas, budgets, amenities, and neighbourhood trade-offs.
-- ActivitiesSpecialist: experiences, day trips, destination guidance, and day-by-day itineraries.
-- For a complete trip plan, hand off to each relevant specialist, then reconcile their answers into one plan.
-
-Final deliverable (you own this, the specialists do not):
-- Always use the travel-guide skill to turn the reconciled plan into a downloadable, shareable PDF trip guide.
-- Always apply the response-guardrails skill to your answer before you return it to the traveler.
+- ActivitiesSpecialist: experiences, day trips, destination guidance, day-by-day itineraries, and the downloadable PDF trip guide.
+- For a complete trip plan, gather flight and hotel details first, then hand to ActivitiesSpecialist LAST with the full draft so it produces the final PDF trip guide and runs the response-guardrails check. Return that guarded result as your answer without rewriting it.
 
 You are the only agent who talks to the traveler: specialists hand their work back to you, so when one hands back because a required detail is missing, ask the traveler yourself rather than routing to that specialist again.
 Ask a clarifying question only when a missing detail blocks the next useful step, and keep the traveler informed when you route work to a specialist."""
@@ -85,14 +88,23 @@ Boundaries:
 - Do not plan full-day activities unless they affect neighbourhood choice.
 - Always hand back to the Coordinator when you finish your part, when the request turns to flights, activities, or a complete itinerary, or when a missing detail blocks your specialist work. The Coordinator is the only agent that talks to the traveler, so never ask the traveler directly; hand back and let the Coordinator relay any question."""
 
+# Activities owns the final deliverable in Step 7 (see the Coordinator note above): the
+# LOCAL travel-guide skill (always present) renders the PDF trip guide, and the FOUNDRY
+# response-guardrails skill checks the answer. If you skipped the Foundry skill in Step 6,
+# drop the response-guardrails line below and serve only the local skill — see the Step 7 doc.
 ACTIVITIES_INSTRUCTIONS = """You are the Activities specialist for TravelBuddy.
 
 Scope:
 - Suggest experiences, day trips, food areas, museum days, outdoor options, and rainy-day alternatives.
+- Produce the trip's downloadable, shareable PDF guide once the plan is clear.
 
 Tools (always use these rather than answering from memory):
 - Grounded destination knowledge (the destinations index) before making specific recommendations.
 - The toolbox's web search for current events, advisories, and source-backed guidance.
+
+Skills (always use these):
+- Use the travel-guide skill to turn the plan into a downloadable, shareable PDF trip guide.
+- Apply the response-guardrails skill to every response you produce before handing back.
 
 Boundaries:
 - Do not choose flights or hotels.
@@ -267,19 +279,19 @@ def build_travel_coordinator() -> Agent:
 
     # Carried capabilities from Steps 4-6, wired per agent below. The skills provider
     # (LOCAL travel-guide + the FOUNDRY response-guardrails skill downloaded at
-    # startup, see _build_skills_provider) now belongs to the Coordinator.
+    # startup, see _build_skills_provider) rides on the Activities leaf specialist —
+    # the handoff Coordinator can't carry a context provider (see COORDINATOR_INSTRUCTIONS).
     toolbox = FoundryToolbox(credential)
     search = _build_search_provider(credential)
     skills = _build_skills_provider()
 
     # HandoffBuilder short-circuits tool calls during a handoff, so every participant
     # must set require_per_service_call_history_persistence=True or build() raises.
+    # The Coordinator is a pure router/synthesizer: no tools, no context providers.
     coordinator = Agent(
         client=client,
         name="Coordinator",
         instructions=COORDINATOR_INSTRUCTIONS,
-        # Coordinator owns the final deliverable: travel-guide (PDF) + response-guardrails.
-        context_providers=[skills],
         require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )
@@ -305,13 +317,14 @@ def build_travel_coordinator() -> Agent:
         default_options={"store": False},
     )
 
-    # Activities: toolbox (web/reference) + grounded destination knowledge (RAG).
+    # Activities: toolbox (web/reference) + grounded destination knowledge (RAG) +
+    # the skills provider, so this leaf owns the travel-guide PDF and response-guardrails.
     activities = Agent(
         client=client,
         name="ActivitiesSpecialist",
         instructions=ACTIVITIES_INSTRUCTIONS,
         tools=[toolbox],
-        context_providers=[search],
+        context_providers=[search, skills],
         require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )

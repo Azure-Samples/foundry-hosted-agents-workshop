@@ -35,10 +35,10 @@ load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
 
-# The Coordinator owns the final deliverable: the LOCAL travel-guide skill (always
-# present) renders the PDF trip guide, and the FOUNDRY response-guardrails skill
-# checks the final answer. If you skipped the Foundry skill in Step 6, drop the
-# response-guardrails line below — see the Step 7 doc callout.
+# In Steps 8-9 the workflow's finalize_itinerary node owns the final deliverable
+# (travel-guide PDF + response-guardrails); see FINALIZE_INSTRUCTIONS in workflow.py.
+# The Coordinator here is a pure router, used only by the legacy runtime handoff
+# (build_travel_coordinator, kept for reference) — main.py hosts the workflow instead.
 COORDINATOR_INSTRUCTIONS = """You are TravelBuddy's Coordinator. Understand the traveler's request, route specialist work to the right agent, and synthesize a clear final answer.
 
 Routing:
@@ -46,10 +46,6 @@ Routing:
 - HotelsSpecialist: lodging areas, budgets, amenities, and neighbourhood trade-offs.
 - ActivitiesSpecialist: experiences, day trips, destination guidance, and day-by-day itineraries.
 - For a complete trip plan, hand off to each relevant specialist, then reconcile their answers into one plan.
-
-Final deliverable (you own this, the specialists do not):
-- Always use the travel-guide skill to turn the reconciled plan into a downloadable, shareable PDF trip guide.
-- Always apply the response-guardrails skill to your answer before you return it to the traveler.
 
 You are the only agent who talks to the traveler: specialists hand their work back to you, so when one hands back because a required detail is missing, ask the traveler yourself rather than routing to that specialist again.
 Ask a clarifying question only when a missing detail blocks the next useful step, and keep the traveler informed when you route work to a specialist."""
@@ -321,16 +317,22 @@ def create_activities_agent(client: FoundryChatClient, credential=None) -> Agent
 
 
 def build_travel_coordinator() -> Agent:
-    """Build the Step 7 Coordinator + specialists handoff, exposed as one agent."""
+    """Legacy Step 7-style handoff Coordinator, kept as reference only.
+
+    Steps 8-9 host the workflow (see workflow.py / main.py), not this factory. It
+    is a pure router with no deliverable owner: the travel-guide PDF and
+    response-guardrails skills live on the workflow's finalize node, not here. Do
+    not use this as the Step 8/9 runtime path.
+    """
     credential = DefaultAzureCredential()
     client = make_client(credential)
 
+    # Pure router: no tools, no context providers. In Steps 8-9 the deliverable
+    # (travel-guide PDF + response-guardrails) lives on the workflow's finalize node.
     coordinator = Agent(
         client=client,
         name="Coordinator",
         instructions=COORDINATOR_INSTRUCTIONS,
-        # Coordinator owns the final deliverable: travel-guide (PDF) + response-guardrails.
-        context_providers=[_build_skills_provider()],
         require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )
