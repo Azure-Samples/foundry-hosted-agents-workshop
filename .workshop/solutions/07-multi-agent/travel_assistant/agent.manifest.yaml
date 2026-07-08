@@ -53,7 +53,7 @@ metadata:
     - name: response-guardrails
       description: >
         Foundry Responsible-AI guardrails Skill downloaded from the project and attached to
-        the Coordinator; shareable across agents and required by this step.
+        the Activities specialist; shareable across agents and required by this step.
         Uploaded out-of-band via foundry_skills/provision_skills.py.
       type: skill
   handoff:

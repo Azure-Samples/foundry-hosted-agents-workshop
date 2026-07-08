@@ -89,7 +89,7 @@ The point is a **single source of truth**: the runtime Coordinator and the workf
 
 ### 2. Create `travel_assistant/workflow.py`
 
-The workflow has three custom executors plus agent nodes. `GatherPreferences` fans the request out to all three specialists; `Consolidate` aggregates their answers, checkpoints the draft, then sends the finalize prompt; `finalize_itinerary` is an `AgentExecutor` that writes the plan and — taking over the Step 7 Coordinator's role — owns the final deliverable, using the `travel-guide` skill to render the shareable PDF and the `response-guardrails` skill to check the answer.
+The workflow has three custom executors plus agent nodes. `GatherPreferences` fans the request out to all three specialists; `Consolidate` aggregates their answers, checkpoints the draft, then sends the finalize prompt; `finalize_itinerary` is an `AgentExecutor` that writes the plan and owns the final deliverable, using the `travel-guide` skill to render the shareable PDF and the `response-guardrails` skill to check the answer. This is the payoff over Step 7: there the handoff Coordinator was a pure router that couldn't carry a context provider, so the skills had to ride on the Activities leaf and only guarded that leaf's output. A dedicated `finalize` node owns the deliverable outright and guards the actual final answer.
 
 ```python
 # travel_assistant/workflow.py

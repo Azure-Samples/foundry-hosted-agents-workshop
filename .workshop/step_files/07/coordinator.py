@@ -40,12 +40,16 @@ from tools import convert_currency, get_local_time, get_weather
 load_dotenv(override=True)
 
 # TODO: carry run_local_skill_script over from your Step 6 main.py so the
-# Coordinator can run the local travel-guide skill (it renders the final PDF trip
-# guide), and build the SkillsProvider that serves it. If you built the Foundry
-# response-guardrails skill in Step 6, serve it here too so the Coordinator can
-# guardrail its final answer; if you skipped it (no public-network Foundry
-# project), serve only the local skill and drop the response-guardrails line from
-# COORDINATOR_INSTRUCTIONS.
+# Activities specialist can run the local travel-guide skill (it renders the final
+# PDF trip guide), and build the SkillsProvider that serves it. If you built the
+# Foundry response-guardrails skill in Step 6, serve it here too so Activities can
+# guardrail its answer; if you skipped it (no public-network Foundry project), serve
+# only the local skill and drop the response-guardrails line from ACTIVITIES_INSTRUCTIONS.
+# Why Activities and not the Coordinator? In a runtime handoff the Coordinator issues
+# the handoff tool calls and is re-invoked after each hand-back, so it can't also
+# carry a context provider — the extra tool stream breaks the store=False history
+# replay. The skills therefore ride on a leaf specialist. Step 8's workflow adds a
+# dedicated finalize node that CAN own the deliverable.
 
 
 # --- Instruction constants --------------------------------------------------
@@ -60,19 +64,17 @@ load_dotenv(override=True)
 #       Hotels  -> lodging areas, budgets, amenities, neighbourhood trade-offs
 #       Activities -> experiences, day trips, destination guidance, itineraries
 #   - Full trip: hand off to each relevant specialist, then reconcile into one plan.
-#   - Final deliverable (you own it): always use the travel-guide skill to render
-#     the plan as a downloadable PDF, and always apply the response-guardrails
-#     skill to your answer before returning it (drop that line if you skipped the
-#     Foundry skill in Step 6).
 #   - You are the only agent who talks to the traveler: when a specialist hands
 #     back because a detail is missing, ask the traveler yourself rather than
 #     routing straight back to that specialist (which can loop).
 #   - Ask a clarifying question only when a missing detail blocks the next step;
 #     keep the traveler informed when routing.
+#   (The Coordinator is a pure router — the travel-guide PDF and response-guardrails
+#    ride on the Activities specialist, not here; see the skills TODO above.)
 COORDINATOR_INSTRUCTIONS = ""
 FLIGHTS_INSTRUCTIONS = ""      # TODO: from agents/flights/agent.yaml — flights only; hand back for lodging/activities/full plan.
 HOTELS_INSTRUCTIONS = ""       # TODO: from agents/hotels/agent.yaml — lodging only; use destinations RAG + toolbox web search + currency.
-ACTIVITIES_INSTRUCTIONS = ""   # TODO: from agents/activities/agent.yaml — experiences, day trips, itinerary; toolbox web search + destinations RAG.
+ACTIVITIES_INSTRUCTIONS = ""   # TODO: from agents/activities/agent.yaml — experiences, day trips, itinerary; toolbox web search + destinations RAG + the travel-guide/response-guardrails skills.
 
 
 def _build_search_provider(credential) -> AzureAISearchContextProvider:
@@ -96,7 +98,8 @@ def build_travel_coordinator() -> Agent:
     search = _build_search_provider(credential)
     # TODO: build the skills provider from your Step 6 code (local travel-guide,
     # plus the Foundry response-guardrails skill only if you built it in Step 6).
-    # It belongs to the Coordinator now — it owns the final PDF guide + guardrails.
+    # It belongs to the Activities specialist below — that leaf owns the final PDF
+    # guide + guardrails (the handoff Coordinator can't carry a context provider).
     # skills = ...
 
     # Every participant MUST set require_per_service_call_history_persistence=True.
@@ -106,9 +109,8 @@ def build_travel_coordinator() -> Agent:
     # Carry default_options={"store": False} over from every earlier step: the
     # hosting layer manages history, so don't persist responses server-side. Set
     # it on the Coordinator and all three specialists below.
-    # TODO: once you build the skills provider above, attach it to the Coordinator
-    # with context_providers=[skills] — the Coordinator owns the final PDF guide
-    # and the response-guardrails check.
+    # The Coordinator is a pure router: no tools, no context providers (attaching a
+    # context provider here would break the store=False handoff replay).
     coordinator = Agent(
         client=client,
         name="Coordinator",
@@ -121,7 +123,7 @@ def build_travel_coordinator() -> Agent:
     # to see the exact capability slice, then translate it to Agent(...) arguments:
     #   - `tools:`  -> tools=[...]              (function tools + the toolbox)
     #   - `rag:`    -> context_providers=[search]   (the destinations index)
-    #   (the travel-guide / response-guardrails skills are the Coordinator's, above)
+    #   - `skills:` -> context_providers=[search, skills]   (Activities only)
     # e.g.:
     #   flights = Agent(
     #       client=client, name="FlightsSpecialist", instructions=FLIGHTS_INSTRUCTIONS,
@@ -132,7 +134,7 @@ def build_travel_coordinator() -> Agent:
     #   hotels = Agent(... tools=[convert_currency, toolbox], context_providers=[search],
     #                  require_per_service_call_history_persistence=True,
     #                  default_options={"store": False})
-    #   activities = Agent(... tools=[toolbox], context_providers=[search],
+    #   activities = Agent(... tools=[toolbox], context_providers=[search, skills],
     #                      require_per_service_call_history_persistence=True,
     #                      default_options={"store": False})
 
