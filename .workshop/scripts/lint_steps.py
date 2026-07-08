@@ -188,10 +188,20 @@ def _source_link_failures() -> list[str]:
                 for match in _LINK_RE.finditer(line):
                     url = match.group("url")
                     target = resolve_relative_target(url, base)
-                    if target is None or (REPO_ROOT / target).exists():
+                    if target is None:
                         continue
 
                     location = f"{_relative(path)}:{line_number}"
+                    if target == ".." or target.startswith("../"):
+                        failures.append(
+                            f"{location}: link '{url}' escapes the repo root "
+                            f"(resolves to '{target}') — links must stay inside "
+                            "the repository"
+                        )
+                        continue
+                    if (REPO_ROOT / target).exists():
+                        continue
+
                     root_target = posixpath.normpath(url.partition("#")[0])
                     if (REPO_ROOT / root_target).exists():
                         failures.append(

@@ -70,6 +70,15 @@ def test_absolute_and_anchor_links_are_ignored(synthetic_repo):
     assert lint_steps._source_link_failures() == []
 
 
+def test_link_escaping_repo_root_is_rejected(synthetic_repo):
+    _write(synthetic_repo, "[oops](../../../../etc/passwd)\n")
+
+    failures = lint_steps._source_link_failures()
+
+    assert len(failures) == 1
+    assert "escapes the repo root" in failures[0]
+
+
 def test_real_docs_have_no_link_failures():
     """The shipped step docs and partials must satisfy check K."""
     assert lint_steps._source_link_failures() == []
