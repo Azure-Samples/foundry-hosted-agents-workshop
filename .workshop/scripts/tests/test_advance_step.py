@@ -1107,25 +1107,25 @@ def test_is_machinery_only_push_false_when_empty():
     assert advance_step._is_machinery_only_push(["", "  ", "\n"]) is False
 
 
-def test_is_machinery_only_cli_prints_true(monkeypatch, capsys):
+def test_check_machinery_only_cli_prints_true(monkeypatch, capsys):
     monkeypatch.setattr(
         "sys.stdin",
         io.StringIO(".github/workflows/ci.yml\nMakefile\n.workshop/x.py\n"),
     )
 
-    result = advance_step.main(["--is-machinery-only"])
+    result = advance_step.main(["--check-machinery-only"])
 
     assert result == 0
     assert capsys.readouterr().out.strip() == "true"
 
 
-def test_is_machinery_only_cli_prints_false_for_mixed(monkeypatch, capsys):
+def test_check_machinery_only_cli_prints_false_for_mixed(monkeypatch, capsys):
     monkeypatch.setattr(
         "sys.stdin",
         io.StringIO("Makefile\ntravel_assistant/main.py\n"),
     )
 
-    result = advance_step.main(["--is-machinery-only"])
+    result = advance_step.main(["--check-machinery-only"])
 
     assert result == 0
     assert capsys.readouterr().out.strip() == "false"

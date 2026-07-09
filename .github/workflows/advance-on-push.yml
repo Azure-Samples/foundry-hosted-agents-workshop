@@ -132,7 +132,7 @@ jobs:
           #    that the sync tooling adds. Advancing then would skip them past a
           #    step they never worked on. The machinery list lives in
           #    advance_step.py (single source of truth), so pipe the push's
-          #    changed paths to `--is-machinery-only` rather than duplicating it
+          #    changed paths to `--check-machinery-only` rather than duplicating it
           #    here. Collect every path changed across the push: prefer git diff
           #    over the pushed range (BEFORE..SHA), and fall back to the event
           #    payload union (robust for force-push, where BEFORE may be
@@ -145,7 +145,7 @@ jobs:
             changed="$(jq -r '[ (.commits[]?, (.head_commit // empty)) | (.added[]?, .modified[]?, .removed[]?) ] | unique | .[]' "$GITHUB_EVENT_PATH")"
           fi
           if [[ -n "${changed//[[:space:]]/}" ]] \
-            && [[ "$(printf '%s\n' "$changed" | python3 .workshop/scripts/advance_step.py --is-machinery-only)" == "true" ]]; then
+            && [[ "$(printf '%s\n' "$changed" | python3 .workshop/scripts/advance_step.py --check-machinery-only)" == "true" ]]; then
             echo "This push changed only workshop machinery/platform files (no delivery); not advancing."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
             exit 0

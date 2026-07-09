@@ -60,7 +60,7 @@ SKIP_ADVANCE_SENTINEL = "[skip-advance]"
 # .workshop/, Makefile, …) and push it — even MANUALLY, without the
 # [skip-advance] sentinel the sync tooling adds — without being bumped to the
 # next step. This is the single source of truth: advance-on-push.yml classifies a
-# push by piping its changed paths to `advance_step.py --is-machinery-only`, so
+# push by piping its changed paths to `advance_step.py --check-machinery-only`, so
 # the list is never duplicated in the workflow.
 MACHINERY_PATHS = (
     ".github",
@@ -125,7 +125,7 @@ def _is_machinery_only_push(paths: Sequence[str]) -> bool:
     return bool(changed) and all(_is_machinery_path(p) for p in changed)
 
 
-def _run_is_machinery_only() -> int:
+def _run_check_machinery_only() -> int:
     """Print ``true``/``false`` for the newline-separated paths read from stdin.
 
     Used by ``.github/workflows/advance-on-push.yml`` to decide whether a push
@@ -1010,8 +1010,8 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         ),
     )
     mode_group.add_argument(
-        "--is-machinery-only",
-        dest="is_machinery_only",
+        "--check-machinery-only",
+        dest="check_machinery_only",
         action="store_true",
         help=(
             "Read newline-separated repo paths from stdin and print 'true' when "
@@ -1039,8 +1039,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        if args.is_machinery_only:
-            return _run_is_machinery_only()
+        if args.check_machinery_only:
+            return _run_check_machinery_only()
         if args.init:
             return _init(dry_run=args.dry_run)
         if args.reset:
