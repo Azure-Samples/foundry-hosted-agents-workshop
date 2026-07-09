@@ -364,6 +364,8 @@ def sync(
         if push:
             _git("push")
             print("Pushed to the current branch.")
+        else:
+            print("Review the commit, then run `git push` to update your branch.")
     else:
         print(
             "\nChanges are staged but not committed. Commit with the "
