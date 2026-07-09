@@ -340,7 +340,7 @@ This workshop does not use marketplace actions for advancing steps; it uses the 
 
 ### "My push didn't advance the step"
 
-Auto-advance only runs for pushes to `main` in your own (non-template) repo, and it skips pushes that only changed workshop bookkeeping such as `.workshop_instance/.workshop-state.json`. Check the **Actions** tab for the **Advance workshop on push to main** run. If it was skipped, make sure you pushed a real change to `main` and that the previous advance already finished. If several quick pushes collapsed into a single advance, that's expected — each *landed* push advances one step.
+Auto-advance only runs for pushes to `main` in your own (non-template) repo, and it skips a few kinds of push that aren't step progress: pushes that only changed workshop bookkeeping such as `.workshop_instance/.workshop-state.json`, pushes whose commit carries a `[skip-advance]` marker (what a template sync adds), and pushes that changed **only** workshop machinery or platform files (`.github/`, `.workshop/`, `Makefile`, `.devcontainer/`, `README.md`, …) and never your delivery (`travel_assistant/` or its sibling folders like `travel_toolbox/`). That last case means you can pull the latest machinery from upstream and push it — even manually, without the `[skip-advance]` marker — without being bumped to the next step. Check the **Actions** tab for the **Advance workshop on push to main** run. If it was skipped, make sure your push touched a delivery file and that the previous advance already finished. If several quick pushes collapsed into a single advance, that's expected — each *landed* push advances one step.
 
 ### "Codespace can't reach my Foundry project"
 

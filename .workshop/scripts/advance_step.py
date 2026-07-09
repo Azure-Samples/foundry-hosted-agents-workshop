@@ -52,6 +52,32 @@ SCHEMA_VERSION = 1
 # advance. Keep this literal in sync with sync_template.SKIP_ADVANCE_SENTINEL and
 # the SENTINEL in .github/workflows/advance-on-push.yml.
 SKIP_ADVANCE_SENTINEL = "[skip-advance]"
+# Repo paths that are workshop machinery or platform scaffolding — never the
+# participant's delivery (travel_assistant/ and the _root overlay siblings such
+# as travel_toolbox/, travel_indexer/, foundry_skills/). A push that changes ONLY
+# these paths is not step progress, so advance-on-push.yml must not advance the
+# workshop on it. This lets a participant pull the latest machinery (.github/,
+# .workshop/, Makefile, …) and push it — even MANUALLY, without the
+# [skip-advance] sentinel the sync tooling adds — without being bumped to the
+# next step. This is the single source of truth: advance-on-push.yml classifies a
+# push by piping its changed paths to `advance_step.py --check-machinery-only`, so
+# the list is never duplicated in the workflow.
+MACHINERY_PATHS = (
+    ".github",
+    ".workshop",
+    ".workshop_instance",
+    ".devcontainer",
+    ".vscode",
+    "Makefile",
+    "README.md",
+    ".env.example",
+    ".gitignore",
+    ".gitattributes",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "LICENSE",
+)
 # Paths that --auto-commit is allowed to stage. Limited to workshop-owned
 # locations so unrelated local edits, untracked files, or secrets are never
 # swept into a commit by accident.
@@ -68,6 +94,47 @@ _REMOTE_RE = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 class AdvanceError(RuntimeError):
     """Raised when the workshop cannot be advanced safely."""
+
+
+def _is_machinery_path(path: str) -> bool:
+    """Return True when ``path`` is workshop machinery/platform, not delivery.
+
+    A path matches when it equals a ``MACHINERY_PATHS`` entry or sits under one
+    (prefix + "/"). Leading/trailing slashes and whitespace are ignored so the
+    check is robust to however the caller formats the path.
+    """
+
+    normalized = path.strip().strip("/")
+    if not normalized:
+        return False
+    return any(
+        normalized == entry or normalized.startswith(f"{entry}/")
+        for entry in MACHINERY_PATHS
+    )
+
+
+def _is_machinery_only_push(paths: Sequence[str]) -> bool:
+    """Return True when a non-empty set of changed ``paths`` is *all* machinery.
+
+    An empty set is not machinery-only: with nothing to classify there is no
+    basis to suppress an advance, so the caller falls through to its normal
+    behavior.
+    """
+
+    changed = [p for p in (path.strip() for path in paths) if p]
+    return bool(changed) and all(_is_machinery_path(p) for p in changed)
+
+
+def _run_check_machinery_only() -> int:
+    """Print ``true``/``false`` for the newline-separated paths read from stdin.
+
+    Used by ``.github/workflows/advance-on-push.yml`` to decide whether a push
+    touched only workshop machinery (and therefore must not advance the step).
+    """
+
+    paths = sys.stdin.read().splitlines()
+    print("true" if _is_machinery_only_push(paths) else "false")
+    return 0
 
 
 def _step_dir_name(step: int) -> str:
@@ -942,6 +1009,17 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
             "step otherwise. Emits advanced=true|false to $GITHUB_OUTPUT."
         ),
     )
+    mode_group.add_argument(
+        "--check-machinery-only",
+        dest="check_machinery_only",
+        action="store_true",
+        help=(
+            "Read newline-separated repo paths from stdin and print 'true' when "
+            "they are ALL workshop machinery/platform files (so a push touching "
+            "only them must not advance the step), otherwise 'false'. Used by "
+            "advance-on-push.yml to guard manual machinery pushes."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print planned actions only.")
     parser.add_argument(
         "--auto-commit",
@@ -961,6 +1039,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        if args.check_machinery_only:
+            return _run_check_machinery_only()
         if args.init:
             return _init(dry_run=args.dry_run)
         if args.reset:

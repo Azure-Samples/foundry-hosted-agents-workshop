@@ -123,6 +123,43 @@ jobs:
             exit 0
           fi
 
+          # 4) Machinery guard: a push that changes ONLY workshop machinery /
+          #    platform files (.github/, .workshop/, Makefile, …) and never the
+          #    participant's delivery (travel_assistant/ and its _root overlay
+          #    siblings such as travel_toolbox/) is not step progress. This
+          #    catches a participant who pulls the latest machinery from upstream
+          #    and pushes it MANUALLY — i.e. without the [skip-advance] sentinel
+          #    that the sync tooling adds. Advancing then would skip them past a
+          #    step they never worked on. The machinery list lives in
+          #    advance_step.py (single source of truth), so pipe the push's
+          #    changed paths to `--check-machinery-only` rather than duplicating
+          #    it here. Use `git diff` over the whole pushed range (BEFORE..SHA):
+          #    the checkout is full-depth and guard #1 already fetched the ref, so
+          #    for a normal machinery pull (a fast-forward, BEFORE reachable) this
+          #    sees every changed path with no cap. Deliberately do NOT fall back
+          #    to the event payload when BEFORE is unreachable (a force-push): that
+          #    payload caps .commits[] at 20 entries and could omit a delivery
+          #    path, which would wrongly suppress a real advance. Treat an
+          #    undeterminable set as "unknown" and let the push advance (legacy
+          #    behavior) — better to advance than to strand a participant.
+          #    python3 is preinstalled on the runner and the script is stdlib-only,
+          #    so this runs before the Setup Python step.
+          changed=""
+          if [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            changed="$(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA")"
+          fi
+          if [[ -n "${changed//[[:space:]]/}" ]]; then
+            # Capture in its own variable so a nonzero exit from the classifier
+            # trips `set -e` (fail closed: don't silently advance) instead of the
+            # comparison quietly evaluating false inside `[[ "$(...)" ]]`.
+            machinery_only="$(printf '%s\n' "$changed" | python3 .workshop/scripts/advance_step.py --check-machinery-only)"
+            if [[ "$machinery_only" == "true" ]]; then
+              echo "This push changed only workshop machinery/platform files (no delivery); not advancing."
+              echo "proceed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
           echo "proceed=true" >> "$GITHUB_OUTPUT"
 
       - name: Setup Python
