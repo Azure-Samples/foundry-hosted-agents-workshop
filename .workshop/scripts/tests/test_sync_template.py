@@ -319,6 +319,54 @@ def test_skip_workflows_drops_paths_inside_workflows(tmp_path: Path, monkeypatch
     assert sync_template.SKIP_ADVANCE_SENTINEL not in log
 
 
+@_requires_git
+def test_skip_workflows_excludes_prestaged_workflow_edits_from_commit(
+    tmp_path: Path, monkeypatch
+):
+    # A local run in a dirty checkout: the participant already staged an unrelated
+    # edit to a workflow file before running the sync. --skip-workflows must keep
+    # that pre-staged workflow change out of the [skip-advance] sync commit, even
+    # though the commit pathspec (`.github`) would otherwise sweep it in.
+    upstream = tmp_path / "psw_upstream"
+    _init_repo(upstream)
+    good_guard = (
+        'SENTINEL="[skip-advance]"\n'
+        'grep -qF -- "$SENTINEL" && echo "proceed=false"\n'
+    )
+    _write(upstream, ".github/workflows/advance-on-push.yml", good_guard)
+    _write(upstream, ".workshop/a.txt", "v2")
+    _commit_all(upstream, "upstream")
+
+    instance = tmp_path / "psw_instance"
+    _init_repo(instance)
+    _write(instance, ".github/workflows/advance-on-push.yml", good_guard)
+    _write(instance, ".github/workflows/ci.yml", "name: ci-v1\n")
+    _write(instance, ".workshop/a.txt", "v1")
+    _commit_all(instance, "instance")
+    monkeypatch.setattr(sync_template, "REPO_ROOT", instance)
+
+    # Participant stages an unrelated local workflow edit *before* the sync.
+    _write(instance, ".github/workflows/ci.yml", "name: ci-EDITED\n")
+    _git(instance, "add", ".github/workflows/ci.yml")
+
+    result = sync_template.sync(
+        upstream_url=str(upstream), ref="main", commit=True, skip_workflows=True
+    )
+    assert result == 0
+
+    # The sync commit picked up the .workshop change but NOT the pre-staged
+    # workflow edit — that stays out of the [skip-advance] commit.
+    committed = _git(
+        instance, "show", "--name-only", "--pretty=format:", "HEAD"
+    ).stdout
+    assert ".workshop/a.txt" in committed
+    assert ".github/workflows/ci.yml" not in committed
+    # The pre-staged edit is still sitting in the index, untouched.
+    assert ".github/workflows/ci.yml" in _git(
+        instance, "diff", "--cached", "--name-only"
+    ).stdout
+
+
 def test_validate_paths_rejects_protected_and_escaping():
     for bad in (".workshop_instance", "travel_assistant", "README.md", ".env"):
         with pytest.raises(sync_template.SyncError):

@@ -52,11 +52,15 @@ jobs:
 
       - name: Commit and push
         shell: bash
+        # The commit carries "[skip-advance]" so advance-on-push.yml never treats
+        # this reset as a completed step and bumps to the next one. reset-current
+        # rewrites the state file to the SAME step (often a no-op diff), so the
+        # sentinel — not the state-file guard — is what keeps the step in place.
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git diff --cached --quiet || git commit -m "workshop: reset current step"
+          git diff --cached --quiet || git commit -m "workshop: reset current step [skip-advance]"
           git push
 
       - name: Summarize reset

@@ -314,7 +314,59 @@ def test_reset_current_auto_commit_creates_commit(workshop_repo):
 
     assert result == 0
     log = _git(workshop_repo, "log", "-1", "--format=%s").stdout.strip()
-    assert log == "workshop: reset current step 4"
+    assert log == "workshop: reset current step 4 [skip-advance]"
+
+
+@_requires_git
+def test_reset_current_commit_carries_skip_advance_when_state_unchanged(workshop_repo):
+    # reset-current rewrites the state file to the SAME step, so when state is
+    # already canonical there is no state-file diff for advance-on-push.yml to key
+    # off. The [skip-advance] sentinel is therefore what must keep a pushed
+    # reset-current commit from advancing the learner — assert it is always there,
+    # even when travel_assistant/ is the only workshop-owned change.
+    _write_readme(workshop_repo, 6)
+    _create_step_files(workshop_repo, 6, "step 6 starter")
+    # Seed the state file in advance_step's own canonical format so a later
+    # re-write produces a byte-identical file (no state-file diff).
+    advance_step._write_state(6)
+    _git_init_with_identity(workshop_repo)
+    _git(workshop_repo, "add", "-A")
+    _git(workshop_repo, "commit", "-q", "-m", "canonical step 6")
+    # Now the learner edits travel_assistant/ only.
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("local edit", encoding="utf-8")
+    _git(workshop_repo, "add", "-A")
+    _git(workshop_repo, "commit", "-q", "-m", "learner work")
+
+    result = advance_step.main(["--reset-current", "--auto-commit"])
+
+    assert result == 0
+    body = _git(workshop_repo, "log", "-1", "--format=%B").stdout
+    assert advance_step.SKIP_ADVANCE_SENTINEL in body
+    # The state file was byte-identical, so it is NOT part of this commit — proving
+    # the sentinel (not a state-file change) is what suppresses the advance.
+    changed = _git(workshop_repo, "show", "--name-only", "--pretty=format:", "HEAD").stdout
+    assert ".workshop_instance/.workshop-state.json" not in changed
+
+
+def test_reset_current_errors_when_step_files_missing(workshop_repo, capsys):
+    # The current step ships no starter files. reset-current must refuse loudly
+    # instead of backing up + wiping travel_assistant/ and reporting success with
+    # nothing laid back down.
+    _write_state(workshop_repo, 3)
+    _write_readme(workshop_repo, 3)
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("my work", encoding="utf-8")
+    # Deliberately do NOT create .workshop/step_files/03/.
+    original_readme = (workshop_repo / "README.md").read_text(encoding="utf-8")
+
+    result = advance_step.main(["--reset-current"])
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "step_files/03/ is missing" in captured.err
+    # Nothing was touched: work preserved, no backup taken, README unchanged.
+    assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "my work"
+    assert (workshop_repo / "README.md").read_text(encoding="utf-8") == original_readme
+    assert not list((workshop_repo / ".workshop_instance" / "workshop_backups").glob("*"))
 
 
 def test_reset_and_reset_current_are_mutually_exclusive(workshop_repo, capsys):

@@ -44,6 +44,14 @@ STEP_FILES_DIR = ".workshop/step_files"
 ROOT_OVERLAY_DIR = "_root"
 BACKUPS_DIR = ".workshop_instance/workshop_backups"
 SCHEMA_VERSION = 1
+# Commit-message sentinel that advance-on-push.yml looks for to suppress an
+# auto-advance. reset-current re-lays the CURRENT step (it must not move to the
+# next one), and it rewrites the state file to the *same* step — often a no-op
+# diff — so the state-file guard in advance-on-push.yml cannot be relied on to
+# catch it. The sentinel is the explicit, robust signal that a push must not
+# advance. Keep this literal in sync with sync_template.SKIP_ADVANCE_SENTINEL and
+# the SENTINEL in .github/workflows/advance-on-push.yml.
+SKIP_ADVANCE_SENTINEL = "[skip-advance]"
 # Paths that --auto-commit is allowed to stage. Limited to workshop-owned
 # locations so unrelated local edits, untracked files, or secrets are never
 # swept into a commit by accident.
@@ -851,15 +859,24 @@ def _relay_current(*, dry_run: bool, auto_commit: bool) -> int:
     current_step = _load_state()
     _validate_state_sync(current_step, _read_readme_marker())
 
+    # Fail loudly if this step ships no starter files: without them we would back
+    # up and wipe travel_assistant/ (via _lay_down_step_files) yet lay nothing
+    # back down, leaving the learner with an empty folder while reporting success.
+    source = _path(STEP_FILES_DIR) / _step_dir_name(current_step)
+    if not source.is_dir():
+        raise AdvanceError(
+            f"Cannot reset current step {current_step}: "
+            f".workshop/step_files/{_step_dir_name(current_step)}/ is missing. "
+            "The authoring material for this step is incomplete — nothing was changed."
+        )
+
+    commit_message = f"workshop: reset current step {current_step} {SKIP_ADVANCE_SENTINEL}"
     if dry_run:
         print(f"DRY RUN: resetting current step {current_step} to its clean starter files")
         for action in _plan_relay_current(current_step):
             print(action)
         if auto_commit:
-            print(
-                "Would auto-commit workshop-owned paths with message "
-                f"'workshop: reset current step {current_step}'."
-            )
+            print(f"Would auto-commit workshop-owned paths with message '{commit_message}'.")
         return 0
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
@@ -878,7 +895,7 @@ def _relay_current(*, dry_run: bool, auto_commit: bool) -> int:
     label = f"step {current_step}: {name}" if name else f"step {current_step}"
     print(f"Reset current step to clean starter files: {label}")
     if auto_commit:
-        _auto_commit(f"workshop: reset current step {current_step}")
+        _auto_commit(commit_message)
     return 0
 
 

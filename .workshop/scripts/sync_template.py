@@ -33,6 +33,12 @@ updates therefore flow only through a *local* run of this script (a human's Git
 credentials carry the ``workflow`` scope). When workflows are skipped but differ
 upstream, the script prints a NOTE so the maintainer knows to run the local sync.
 
+Because ``--skip-workflows`` never overwrites the instance's ``advance-on-push.yml``,
+it also skips the upstream-guard verification (there is no incoming guard to vet).
+The sync commit still carries ``[skip-advance]``, so a correctly-configured
+instance never advances on a sync; a local ``--skip-workflows --push`` therefore
+trusts that the instance's existing guard already honors the sentinel.
+
 This module is stdlib-only so it runs in GitHub Actions without installing the
 workshop dependencies.
 """
@@ -403,6 +409,13 @@ def sync(
             print("Nothing to sync after excluding workflow paths.")
             return 0
     workflows_in_scope = skip_workflows and _covers(WORKFLOWS_DIR, validated)
+    # Pathspecs for staging inspection and the commit. When skipping workflows we
+    # must exclude .github/workflows/ here too, not just in the mirror: otherwise a
+    # pre-staged or dirty workflow edit already in the index (a local run in a
+    # dirty checkout) would be swept into the [skip-advance] commit via a broad
+    # pathspec like `.github`, defeating --skip-workflows.
+    exclude_specs = [f":(exclude){e}" for e in excludes if _covers(e, validated)]
+    commit_pathspecs = [*validated, *exclude_specs]
 
     origin = _origin_url()
     if origin and _normalize_remote(origin) == _normalize_remote(upstream_url) and not allow_self:
@@ -445,16 +458,16 @@ def sync(
         if skipped_workflows:
             _note_skipped_workflows(skipped_workflows)
 
-    changed = _changed_files(validated, staged=True)
+    changed = _changed_files(commit_pathspecs, staged=True)
     if not changed:
         print("Already up to date; no changes to sync.")
         return 0
 
     print(f"Staged {len(changed)} changed file(s):")
-    print(_git("diff", "--cached", "--stat", "--", *validated).stdout.rstrip())
+    print(_git("diff", "--cached", "--stat", "--", *commit_pathspecs).stdout.rstrip())
 
     if commit:
-        if _commit(COMMIT_MESSAGE, validated):
+        if _commit(COMMIT_MESSAGE, commit_pathspecs):
             print(f"Committed: {COMMIT_MESSAGE}")
         if push:
             if origin and _normalize_remote(origin) == _normalize_remote(upstream_url):
