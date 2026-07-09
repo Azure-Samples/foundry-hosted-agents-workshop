@@ -14,9 +14,30 @@ are never in the sync set, so the current step is preserved. Because the
 mirrored paths are staged (including files deleted upstream), the caller can
 commit and push them as one changeset.
 
+Syncing never re-renders ``README.md`` or re-lays the current step's files. If a
+sync updates the *current* step's authoring material and you want that reflected
+in your working files, run the separate "reset current step" flow afterwards
+(``advance_step.py --reset-current``): sync refreshes the machinery, then reset
+re-applies the current step. Advancing already lays down fresh files, so a sync
+taken just before moving on needs no reset.
+
 Crucially, the sync commit carries a ``[skip-advance]`` sentinel in its message.
 ``advance-on-push.yml`` looks for that sentinel and skips advancing, so pushing a
 sync to ``main`` refreshes the machinery **without moving to the next step**.
+
+``--skip-workflows`` excludes ``.github/workflows/`` from the mirror. The built-in
+``GITHUB_TOKEN`` in GitHub Actions is not permitted to push changes under
+``.github/workflows/``, so the automated ``sync-template.yml`` runs with this flag
+and stays fully tokenless — no Personal Access Token is required. Workflow-file
+updates therefore flow only through a *local* run of this script (a human's Git
+credentials carry the ``workflow`` scope). When workflows are skipped but differ
+upstream, the script prints a NOTE so the maintainer knows to run the local sync.
+
+Because ``--skip-workflows`` never overwrites the instance's ``advance-on-push.yml``,
+it also skips the upstream-guard verification (there is no incoming guard to vet).
+The sync commit still carries ``[skip-advance]``, so a correctly-configured
+instance never advances on a sync; a local ``--skip-workflows --push`` therefore
+trusts that the instance's existing guard already honors the sentinel.
 
 This module is stdlib-only so it runs in GitHub Actions without installing the
 workshop dependencies.
@@ -68,6 +89,11 @@ COMMIT_MESSAGE = f"workshop: sync template infra from upstream {SKIP_ADVANCE_SEN
 # SKIP_ADVANCE_SENTINEL — otherwise a sync could replace the guard with a version
 # that advances the step (see _verify_upstream_guard).
 GUARD_WORKFLOW = ".github/workflows/advance-on-push.yml"
+
+# The directory the automated sync excludes with --skip-workflows. GitHub blocks
+# the built-in Actions token from pushing changes here, so skipping it keeps the
+# sync-template.yml workflow tokenless (see the module docstring).
+WORKFLOWS_DIR = ".github/workflows"
 
 # Characters that would turn a sync path into a git pathspec pattern rather than
 # a literal path. We reject them so --paths can never widen the sync set beyond a
@@ -281,16 +307,31 @@ def _verify_upstream_guard(validated: Sequence[str], *, allow_missing_guard: boo
     )
 
 
-def _mirror_path(path: str) -> None:
+def _covers(target: str, validated: Sequence[str]) -> bool:
+    """Return True when some validated sync path covers ``target``."""
+
+    return any(target == p or target.startswith(p + "/") for p in validated)
+
+
+def _mirror_path(path: str, excludes: Sequence[str] = ()) -> None:
     """Stage ``path`` to exactly match the fetched upstream tree.
 
     Removing the tracked copy first (then restoring from ``FETCH_HEAD``) means
     files deleted upstream are staged as deletions rather than lingering.
     Untracked local files are left untouched by ``git rm``.
+
+    ``excludes`` are repository-relative subtrees to leave completely alone (not
+    removed, not restored). Only excludes that fall *within* ``path`` apply. They
+    are turned into ``:(exclude)<e>`` git pathspecs, which are constructed here in
+    code (never from user input), so they intentionally bypass the leading-``:``
+    rejection in ``_validate_paths``.
     """
 
-    _git("rm", "-r", "-q", "--ignore-unmatch", "--", path)
-    restore = _git("checkout", "FETCH_HEAD", "--", path, check=False)
+    within = [e for e in excludes if e == path or e.startswith(path + "/")]
+    exclude_specs = [f":(exclude){e}" for e in within]
+
+    _git("rm", "-r", "-q", "--ignore-unmatch", "--", path, *exclude_specs)
+    restore = _git("checkout", "FETCH_HEAD", "--", path, *exclude_specs, check=False)
     if restore.returncode != 0:
         stderr = restore.stderr.strip()
         # A missing pathspec means upstream no longer ships this tree at all;
@@ -299,6 +340,19 @@ def _mirror_path(path: str) -> None:
             print(f"  {path}: removed (no longer present upstream)")
             return
         raise SyncError(f"Failed to restore {path} from upstream:\n{stderr}")
+
+
+def _note_skipped_workflows(workflow_files: Sequence[str]) -> None:
+    """Tell the user that upstream workflow changes were skipped and how to get them."""
+
+    print(
+        f"NOTE: {len(workflow_files)} upstream workflow file(s) under "
+        f"{WORKFLOWS_DIR}/ differ but were skipped — the automated sync never "
+        "rewrites workflow files (the built-in Actions token cannot push them).\n"
+        "  To adopt workflow updates, run the sync locally, where your Git "
+        "credentials carry the 'workflow' scope:\n"
+        "    python .workshop/scripts/sync_template.py --auto-commit --push"
+    )
 
 
 def _commit(message: str, paths: Sequence[str]) -> bool:
@@ -325,6 +379,7 @@ def sync(
     push: bool = False,
     allow_self: bool = False,
     allow_missing_guard: bool = False,
+    skip_workflows: bool = False,
     dry_run: bool = False,
 ) -> int:
     """Mirror ``paths`` from ``upstream_url@ref`` into this instance.
@@ -334,6 +389,33 @@ def sync(
     """
 
     validated = _validate_paths(paths)
+
+    # --skip-workflows must never adopt anything under .github/workflows/, in
+    # either direction: drop any requested path that *is inside* the workflows
+    # tree (e.g. `--paths .github/workflows/ci.yml`), and exclude the workflows
+    # subtree from any requested path that *contains* it (e.g. `.github`). The
+    # drop closes the gap where targeting a workflow file directly would slip past
+    # the subtree exclude and, with guard verification skipped, adopt a workflow.
+    excludes = (WORKFLOWS_DIR,) if skip_workflows else ()
+    if skip_workflows:
+        dropped = [p for p in validated if _covers(p, (WORKFLOWS_DIR,))]
+        if dropped:
+            validated = [p for p in validated if p not in set(dropped)]
+            print(
+                f"Skipping {', '.join(dropped)} because --skip-workflows leaves "
+                f"{WORKFLOWS_DIR}/ untouched."
+            )
+        if not validated:
+            print("Nothing to sync after excluding workflow paths.")
+            return 0
+    workflows_in_scope = skip_workflows and _covers(WORKFLOWS_DIR, validated)
+    # Pathspecs for staging inspection and the commit. When skipping workflows we
+    # must exclude .github/workflows/ here too, not just in the mirror: otherwise a
+    # pre-staged or dirty workflow edit already in the index (a local run in a
+    # dirty checkout) would be swept into the [skip-advance] commit via a broad
+    # pathspec like `.github`, defeating --skip-workflows.
+    exclude_specs = [f":(exclude){e}" for e in excludes if _covers(e, validated)]
+    commit_pathspecs = [*validated, *exclude_specs]
 
     origin = _origin_url()
     if origin and _normalize_remote(origin) == _normalize_remote(upstream_url) and not allow_self:
@@ -348,32 +430,54 @@ def sync(
 
     if dry_run:
         changed = _changed_files(validated, staged=False)
+        skipped_workflows = [f for f in changed if _covers(f, (WORKFLOWS_DIR,))]
+        if skip_workflows:
+            changed = [f for f in changed if f not in set(skipped_workflows)]
         if not changed:
             print("DRY RUN: already up to date; no changes to sync.")
-            return 0
-        print(f"DRY RUN: {len(changed)} file(s) would change:")
-        for name in changed:
-            print(f"  {name}")
+        else:
+            print(f"DRY RUN: {len(changed)} file(s) would change:")
+            for name in changed:
+                print(f"  {name}")
+        if workflows_in_scope and skipped_workflows:
+            _note_skipped_workflows(skipped_workflows)
         return 0
 
-    _verify_upstream_guard(validated, allow_missing_guard=allow_missing_guard)
+    # Skipping workflows means we never adopt the upstream .github/workflows/
+    # tree, so the local advance guard is untouched and there is nothing to
+    # verify. Only guard-check when we would actually overwrite workflow files.
+    if not skip_workflows:
+        _verify_upstream_guard(validated, allow_missing_guard=allow_missing_guard)
 
     print(f"Mirroring {', '.join(validated)} from upstream ...")
     for path in validated:
-        _mirror_path(path)
+        _mirror_path(path, excludes)
 
-    changed = _changed_files(validated, staged=True)
+    if workflows_in_scope:
+        skipped_workflows = _changed_files([WORKFLOWS_DIR], staged=False)
+        if skipped_workflows:
+            _note_skipped_workflows(skipped_workflows)
+
+    changed = _changed_files(commit_pathspecs, staged=True)
     if not changed:
         print("Already up to date; no changes to sync.")
         return 0
 
     print(f"Staged {len(changed)} changed file(s):")
-    print(_git("diff", "--cached", "--stat", "--", *validated).stdout.rstrip())
+    print(_git("diff", "--cached", "--stat", "--", *commit_pathspecs).stdout.rstrip())
 
     if commit:
-        if _commit(COMMIT_MESSAGE, validated):
+        if _commit(COMMIT_MESSAGE, commit_pathspecs):
             print(f"Committed: {COMMIT_MESSAGE}")
         if push:
+            if origin and _normalize_remote(origin) == _normalize_remote(upstream_url):
+                raise SyncError(
+                    "Refusing to push: origin is the upstream template this sync "
+                    "pulled from. A sync only ever pushes an instance's own refresh "
+                    "back to that instance — never to the template it synced from. "
+                    "The commit is in place locally; push it manually if you really "
+                    "intend to."
+                )
             _git("push")
             print("Pushed to the current branch.")
         else:
@@ -426,7 +530,10 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--allow-self",
         action="store_true",
-        help="Allow syncing when upstream matches origin (running in the template).",
+        help=(
+            "Allow the mirror/stage step when upstream matches origin (running in "
+            "the template). Pushing to the template is still refused regardless."
+        ),
     )
     parser.add_argument(
         "--allow-missing-guard",
@@ -434,6 +541,16 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help=(
             "Proceed even if the upstream advance-on-push.yml lacks the "
             f"{SKIP_ADVANCE_SENTINEL} guard (may allow a sync to advance the step)."
+        ),
+    )
+    parser.add_argument(
+        "--skip-workflows",
+        action="store_true",
+        help=(
+            "Do not sync .github/workflows/ (leave workflow files untouched). "
+            "Lets the automated workflow run tokenless, since the built-in Actions "
+            "token cannot push workflow changes. Run without this flag locally to "
+            "pick up workflow updates."
         ),
     )
     parser.add_argument(
@@ -457,6 +574,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             push=args.push,
             allow_self=args.allow_self,
             allow_missing_guard=args.allow_missing_guard,
+            skip_workflows=args.skip_workflows,
             dry_run=args.dry_run,
         )
     except SyncError as exc:

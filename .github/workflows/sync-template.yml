@@ -2,17 +2,21 @@ name: Sync template infra
 
 # Pull the latest workshop machinery (.workshop/ and .github/) from the upstream
 # template into this instance WITHOUT advancing the current step. Participant work
-# (travel_assistant/), per-instance state (.workshop_instance/), README.md, and
-# .env are never touched. The sync commit carries a "[skip-advance]" sentinel that
+# (travel_assistant/), per-instance state (.workshop_instance/), and .env are never
+# touched, and README.md is never re-rendered — the current step's instructions
+# stay exactly as they are. To re-lay the current step's clean starter files and
+# re-render its README, use the separate "Reset current step" workflow. The sync
+# commit carries a "[skip-advance]" sentinel that
 # advance-on-push.yml honors, so pushing it to the default branch refreshes the
 # machinery but does not move to the next step.
 #
-# .github/workflows push note: the default GITHUB_TOKEN is NOT allowed to push
-# changes to files under .github/workflows/. If the upstream sync updates any
-# workflow file, this run needs a Personal Access Token (or GitHub App token) with
-# the `workflow` scope, stored as the repository secret TEMPLATE_SYNC_TOKEN. When
-# only non-workflow files change, the built-in GITHUB_TOKEN is enough. If you'd
-# rather not create a secret, run the sync locally instead:
+# Tokenless by design: GitHub does not allow the built-in GITHUB_TOKEN to push
+# changes to files under .github/workflows/. Rather than require a Personal Access
+# Token, this workflow runs the sync with --skip-workflows, so it never modifies
+# workflow files and the default GITHUB_TOKEN is always sufficient. No secret is
+# needed. When the upstream workflow files themselves change, this run reports it
+# in the summary; adopt those updates by running the sync locally, where your Git
+# credentials carry the `workflow` scope:
 #   python .workshop/scripts/sync_template.py --auto-commit --push
 
 on:
@@ -50,17 +54,14 @@ jobs:
     # a no-op and the script guards against it anyway.
     if: github.event.repository.is_template == false
     runs-on: ubuntu-latest
-    env:
-      # Secrets can be referenced in expressions, so this is a safe boolean flag.
-      HAS_PAT: ${{ secrets.TEMPLATE_SYNC_TOKEN != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Prefer the PAT (can push .github/workflows changes); fall back to the
-          # built-in token, which suffices when no workflow file changed.
-          token: ${{ secrets.TEMPLATE_SYNC_TOKEN || github.token }}
+          # The default GITHUB_TOKEN is enough because --skip-workflows keeps the
+          # sync from ever touching .github/workflows/ (the one thing this token
+          # cannot push). No PAT / secret is required.
           persist-credentials: true
 
       - name: Setup Python
@@ -86,10 +87,22 @@ jobs:
           if [[ "$DRY_RUN" == "true" ]]; then
             dry_flag=(--dry-run)
           fi
+          # --skip-workflows keeps this run tokenless (see the header comment).
           python .workshop/scripts/sync_template.py \
             --upstream-url "$UPSTREAM_URL" \
             --ref "$UPSTREAM_REF" \
+            --skip-workflows \
             "${dry_flag[@]}"
+
+          # Report whether upstream workflow files differ so the summary can point
+          # the maintainer at the local sync. FETCH_HEAD is set by the script's
+          # fetch above; the skipped workflows are unchanged in HEAD.
+          if git rev-parse --verify --quiet FETCH_HEAD >/dev/null \
+             && [[ -n "$(git diff --name-only HEAD FETCH_HEAD -- .github/workflows)" ]]; then
+            echo "workflows_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "workflows_changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
           if [[ "$DRY_RUN" == "true" ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -100,23 +113,6 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Ensure token can push workflow changes
-        if: steps.sync.outputs.changed == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          # The default GITHUB_TOKEN cannot push changes under .github/workflows/.
-          # If any workflow file changed and no PAT is configured, stop before
-          # committing with a clear, actionable message.
-          if git diff --cached --name-only -- .github/workflows | grep -q . ; then
-            if [[ "${HAS_PAT}" != "true" ]]; then
-              echo "::error::The upstream sync updates files under .github/workflows/, which the built-in GITHUB_TOKEN cannot push." 
-              echo "Add a repository secret named TEMPLATE_SYNC_TOKEN (a PAT or GitHub App token with the 'workflow' scope) and re-run," >&2
-              echo "or run the sync locally: python .workshop/scripts/sync_template.py --auto-commit --push" >&2
-              exit 1
-            fi
           fi
 
       - name: Commit & push
@@ -139,6 +135,7 @@ jobs:
           UPSTREAM_REF: ${{ inputs.ref }}
           DRY_RUN: ${{ inputs.dry_run }}
           CHANGED: ${{ steps.sync.outputs.changed }}
+          WORKFLOWS_CHANGED: ${{ steps.sync.outputs.workflows_changed }}
         run: |
           if [[ "$DRY_RUN" == "true" ]]; then
             echo "## 🔍 Dry run — no changes committed" >> "$GITHUB_STEP_SUMMARY"
@@ -147,10 +144,20 @@ jobs:
           elif [[ "$CHANGED" == "true" ]]; then
             echo "## ✅ Template infra synced" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Pulled the latest \`.workshop/\` and \`.github/\` from \`${UPSTREAM_REF}\` of \`${UPSTREAM_URL}\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "Pulled the latest \`.workshop/\` and \`.github/\` (excluding \`.github/workflows/\`) from \`${UPSTREAM_REF}\` of \`${UPSTREAM_URL}\`." >> "$GITHUB_STEP_SUMMARY"
             echo "Your current step was preserved. Run \`git pull\` locally to refresh." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "## ✅ Already up to date" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "No differences between this instance and the upstream template's \`.workshop/\` and \`.github/\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "No differences between this instance and the upstream template's synced paths." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$WORKFLOWS_CHANGED" == "true" ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ⚠️ Workflow updates were skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Upstream changed files under \`.github/workflows/\`, which this workflow never touches (the built-in token cannot push them)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Adopt the workflow updates by running the sync locally, where your Git credentials carry the \`workflow\` scope:" >> "$GITHUB_STEP_SUMMARY"
+            echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+            echo "python .workshop/scripts/sync_template.py --auto-commit --push" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
           fi
