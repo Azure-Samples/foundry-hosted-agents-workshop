@@ -1,4 +1,5 @@
 import json
+import io
 import shutil
 import subprocess
 import sys
@@ -1041,3 +1042,90 @@ def test_on_push_missing_state_after_init_fails_loudly(workshop_repo, monkeypatc
 
     assert result == 1
     assert "workshop state" in captured.err.lower()
+
+
+# --- machinery-only push classification (advance-on-push guard #4) -----------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/workflows/advance-on-push.yml",
+        ".workshop/scripts/sync_template.py",
+        ".workshop_instance/workshop_backups/x",
+        ".devcontainer/devcontainer.json",
+        ".vscode/settings.json",
+        "Makefile",
+        "README.md",
+        ".env.example",
+        ".gitignore",
+        "CONTRIBUTING.md",
+        ".github",
+    ],
+)
+def test_is_machinery_path_true_for_machinery(path):
+    assert advance_step._is_machinery_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "travel_assistant/main.py",
+        "travel_assistant",
+        "travel_toolbox/toolbox.yaml",
+        "travel_indexer/provision_index.py",
+        "foundry_skills/skills/x/SKILL.md",
+        ".github-notes/readme",  # near-miss: not under .github/
+        ".workshopped/file",  # near-miss: not under .workshop/
+        "",
+    ],
+)
+def test_is_machinery_path_false_for_delivery_and_near_misses(path):
+    assert advance_step._is_machinery_path(path) is False
+
+
+def test_is_machinery_only_push_true_when_all_machinery():
+    changed = [".github/workflows/ci.yml", "Makefile", ".workshop/scripts/x.py"]
+    assert advance_step._is_machinery_only_push(changed) is True
+
+
+def test_is_machinery_only_push_false_when_any_delivery():
+    changed = ["Makefile", "travel_assistant/main.py"]
+    assert advance_step._is_machinery_only_push(changed) is False
+
+
+def test_is_machinery_only_push_false_for_root_overlay_delivery():
+    """A push that only touches a _root overlay sibling is real progress."""
+
+    assert advance_step._is_machinery_only_push(["travel_toolbox/toolbox.yaml"]) is False
+
+
+def test_is_machinery_only_push_false_when_empty():
+    """No changed paths => no basis to suppress an advance."""
+
+    assert advance_step._is_machinery_only_push([]) is False
+    assert advance_step._is_machinery_only_push(["", "  ", "\n"]) is False
+
+
+def test_is_machinery_only_cli_prints_true(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(".github/workflows/ci.yml\nMakefile\n.workshop/x.py\n"),
+    )
+
+    result = advance_step.main(["--is-machinery-only"])
+
+    assert result == 0
+    assert capsys.readouterr().out.strip() == "true"
+
+
+def test_is_machinery_only_cli_prints_false_for_mixed(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO("Makefile\ntravel_assistant/main.py\n"),
+    )
+
+    result = advance_step.main(["--is-machinery-only"])
+
+    assert result == 0
+    assert capsys.readouterr().out.strip() == "false"
