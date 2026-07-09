@@ -59,7 +59,38 @@ jobs:
           fi
           git reset --hard "$remote_sha"
 
-          # 2) State-file guard: if this push already carried a change to
+          # 2) Sync sentinel guard: a template-sync push (see
+          #    .github/workflows/sync-template.yml and
+          #    .workshop/scripts/sync_template.py) refreshes .workshop/ and
+          #    .github/ from upstream and must NOT advance the step. Those commits
+          #    carry a literal "[skip-advance]" marker in their message. Check
+          #    EVERY commit in the push (not just the tip), so a sync commit that
+          #    is not the tip — e.g. a manual push that bundles another commit
+          #    after it — still suppresses the advance. Prefer the event payload
+          #    (robust for force-push), fall back to the pushed range, then the
+          #    tip. Match as a fixed string so the brackets can't act as a regex
+          #    character class. Keep the marker in sync with SKIP_ADVANCE_SENTINEL.
+          SENTINEL="[skip-advance]"
+          sentinel_found=false
+          if [[ -f "$GITHUB_EVENT_PATH" ]] && command -v jq >/dev/null 2>&1; then
+            if jq -e --arg s "$SENTINEL" '[ (.commits[]?, (.head_commit // empty)) | .message // empty | select(contains($s)) ] | length > 0' "$GITHUB_EVENT_PATH" >/dev/null; then
+              sentinel_found=true
+            fi
+          elif [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            if git log --format=%B "${BEFORE_SHA}..${GITHUB_SHA}" | grep -qF -- "$SENTINEL"; then
+              sentinel_found=true
+            fi
+          elif git log -1 --pretty=%B "$GITHUB_SHA" | grep -qF -- "$SENTINEL"; then
+            sentinel_found=true
+          fi
+
+          if [[ "$sentinel_found" == "true" ]]; then
+            echo "A commit in this push carries [skip-advance] (template sync); not advancing."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 3) State-file guard: if this push already carried a change to
           #    .workshop_instance/.workshop-state.json, it was an advance/reset/init
           #    commit (the bot's own, or a local `make advance`). Advancing again
           #    would double-step, so skip. Prefer the event payload file lists
