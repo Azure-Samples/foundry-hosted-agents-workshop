@@ -13,7 +13,7 @@ name: Sync template infra
 # the `workflow` scope, stored as the repository secret TEMPLATE_SYNC_TOKEN. When
 # only non-workflow files change, the built-in GITHUB_TOKEN is enough. If you'd
 # rather not create a secret, run the sync locally instead:
-#   python .workshop/scripts/sync_template.py --commit --push
+#   python .workshop/scripts/sync_template.py --auto-commit --push
 
 on:
   workflow_dispatch:
@@ -114,7 +114,7 @@ jobs:
             if [[ "${HAS_PAT}" != "true" ]]; then
               echo "::error::The upstream sync updates files under .github/workflows/, which the built-in GITHUB_TOKEN cannot push." 
               echo "Add a repository secret named TEMPLATE_SYNC_TOKEN (a PAT or GitHub App token with the 'workflow' scope) and re-run," >&2
-              echo "or run the sync locally: python .workshop/scripts/sync_template.py --commit --push" >&2
+              echo "or run the sync locally: python .workshop/scripts/sync_template.py --auto-commit --push" >&2
               exit 1
             fi
           fi

@@ -87,7 +87,7 @@ _ALLOWED_GIT_SUBCOMMANDS = frozenset(
         "diff",  # report staged / upstream-vs-HEAD changes
         "rm",  # stage deletions when mirroring
         "checkout",  # restore files from the fetched tree
-        "commit",  # commit the mirrored changes (--commit)
+        "commit",  # commit the mirrored changes (--auto-commit)
         "push",  # push the sync commit (--push)
     }
 )
@@ -402,14 +402,14 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Repository paths to mirror (default: .workshop .github).",
     )
     parser.add_argument(
-        "--commit",
+        "--auto-commit",
         action="store_true",
         help=f"Commit the staged changes with the {SKIP_ADVANCE_SENTINEL} sentinel.",
     )
     parser.add_argument(
         "--push",
         action="store_true",
-        help="Push after committing (implies --commit).",
+        help="Push after committing (implies --auto-commit).",
     )
     parser.add_argument(
         "--allow-self",
@@ -441,7 +441,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             upstream_url=args.upstream_url,
             ref=args.ref,
             paths=args.paths,
-            commit=args.commit or args.push,
+            commit=args.auto_commit or args.push,
             push=args.push,
             allow_self=args.allow_self,
             allow_missing_guard=args.allow_missing_guard,

@@ -24,7 +24,7 @@ help:
 	@echo "  $(PYTHON) .workshop/scripts/advance_step.py --expected-current-step 0 --auto-commit"
 	@echo "  $(PYTHON) .workshop/scripts/advance_step.py --reset --auto-commit"
 	@echo "  $(PYTHON) .workshop/scripts/preflight.py"
-	@echo "  $(PYTHON) .workshop/scripts/sync_template.py --commit   # add --push to push too"
+	@echo "  $(PYTHON) .workshop/scripts/sync_template.py --auto-commit   # add --push to push too"
 
 advance:
 	$(PYTHON) .workshop/scripts/advance_step.py --auto-commit
@@ -36,4 +36,4 @@ preflight:
 	$(PYTHON) .workshop/scripts/preflight.py
 
 sync-template:
-	$(PYTHON) .workshop/scripts/sync_template.py --commit
+	$(PYTHON) .workshop/scripts/sync_template.py --auto-commit
