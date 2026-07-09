@@ -1129,3 +1129,43 @@ def test_check_machinery_only_cli_prints_false_for_mixed(monkeypatch, capsys):
 
     assert result == 0
     assert capsys.readouterr().out.strip() == "false"
+
+
+def test_machinery_paths_cover_every_tracked_root_entry():
+    """Guard MACHINERY_PATHS against drifting behind new root-level template files.
+
+    Every tracked top-level path in the *real* repo must classify as either
+    machinery (``MACHINERY_PATHS``) or known delivery (``travel_assistant/`` or a
+    ``_root`` overlay sibling like ``travel_toolbox/``). If upstream later adds a
+    new root-level machinery file (e.g. ``.editorconfig``) and nobody adds it to
+    ``MACHINERY_PATHS``, a participant who manually pulls and pushes only that
+    file would be wrongly advanced — reintroducing the exact bug this guard
+    fixes. This test fails loudly in that case, forcing the maintainer to
+    classify the new path.
+
+    Runs against the real repository root (this test intentionally does NOT use
+    the ``workshop_repo`` fixture, so ``advance_step.REPO_ROOT`` is unpatched).
+    """
+
+    repo_root = advance_step.REPO_ROOT
+    tracked = subprocess.run(
+        ["git", "ls-files"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    top_level = {line.split("/", 1)[0] for line in tracked if line}
+
+    delivery = {advance_step.TRAVEL_ASSISTANT_DIR} | advance_step._root_overlay_targets()
+    unclassified = sorted(
+        name
+        for name in top_level
+        if not advance_step._is_machinery_path(name) and name not in delivery
+    )
+
+    assert not unclassified, (
+        f"Unclassified top-level path(s): {unclassified}. Add each to "
+        "MACHINERY_PATHS in advance_step.py if it is workshop machinery/platform "
+        "scaffolding, or confirm it is participant delivery."
+    )
