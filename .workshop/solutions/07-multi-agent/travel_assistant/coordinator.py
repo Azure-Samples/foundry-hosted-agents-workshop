@@ -55,7 +55,7 @@ Routing:
 - For a complete trip plan, gather flight and hotel details first, then hand to ActivitiesSpecialist LAST with the full draft so it produces the final PDF trip guide and runs the response-guardrails check. Return that guarded result as your answer without rewriting it.
 
 You are the only agent who talks to the traveler: specialists hand their work back to you, so when one hands back because a required detail is missing, ask the traveler yourself rather than routing to that specialist again.
-Ask a clarifying question only when a missing detail blocks the next useful step, and keep the traveler informed when you route work to a specialist."""
+Route silently: when you hand a turn to a specialist, emit ONLY the handoff and no user-facing text — a narrated handoff ends the turn before the specialist runs. Write user-facing text only to deliver the final answer or to ask a clarifying question, and ask one only when a missing detail blocks the next useful step."""
 
 FLIGHTS_INSTRUCTIONS = """You are the Flights specialist for TravelBuddy.
 
@@ -329,10 +329,23 @@ def build_travel_coordinator() -> Agent:
         default_options={"store": False},
     )
 
+    # A termination_condition makes each hosted turn end IDLE instead of
+    # IDLE_WITH_PENDING_REQUESTS. Without it HandoffBuilder parks after every
+    # Coordinator turn waiting for a function-result reply; the hosting layer then
+    # delivers the next user question as plain text, which the parked workflow can't
+    # accept -> "Unexpected content type while awaiting request info responses" on the
+    # second question. We terminate once the Coordinator produces its own answer (the
+    # last message is the Coordinator's assistant text). This pairs with the
+    # Coordinator's silent-routing instruction: a narrated handoff looks like a
+    # Coordinator answer and would end the turn before the specialist runs, so the
+    # Coordinator hands off with no text. See the Step 7 doc troubleshooting entry.
     workflow = (
         HandoffBuilder(
             name="travelbuddy-runtime-handoff",
             participants=[coordinator, flights, hotels, activities],
+            termination_condition=lambda conversation: bool(conversation)
+            and conversation[-1].role == "assistant"
+            and conversation[-1].author_name == "Coordinator",
         )
         .with_start_agent(coordinator)
         .add_handoff(coordinator, [flights, hotels, activities])

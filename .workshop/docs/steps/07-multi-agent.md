@@ -101,7 +101,7 @@ The Coordinator is the only agent the traveler intentionally talks to. `coordina
   - **Role:** you are TravelBuddy's Coordinator — understand the request, route work to the right specialist, and synthesize a single clear answer.
   - **Routing rules,** one line per specialist, matching each slice's `description`: Flights → timing, airports, routes, layovers, weather risk, fares; Hotels → lodging areas, budgets, amenities, neighbourhood trade-offs; Activities → experiences, day trips, destination guidance, day-by-day itineraries.
   - **Full-trip behaviour:** for a complete plan, gather flight and hotel details first, then hand to the **Activities** specialist **last** with the full draft — it owns the `travel-guide` (PDF) and `response-guardrails` skills, so it produces the final deliverable and runs the guardrail check. Return that guarded result without rewriting it.
-  - **Conversation etiquette:** you are the only agent who talks to the traveler, so when a specialist hands back because a detail is missing, ask the traveler yourself rather than routing straight back to that specialist (which can loop); ask a clarifying question only when a missing detail blocks the next useful step, and let the traveler know when you're routing to a specialist.
+  - **Conversation etiquette:** you are the only agent who talks to the traveler, so when a specialist hands back because a detail is missing, ask the traveler yourself rather than routing straight back to that specialist (which can loop). **Route silently:** when you hand a turn to a specialist, emit **only** the handoff and no user-facing text — a narrated handoff ends the turn before the specialist runs (see the `termination_condition` note under the pre-wired graph below). Write user-facing text only to deliver the final answer or to ask a clarifying question, and ask one only when a missing detail blocks the next useful step.
 - the carried `search` RAG provider (from Step 5) for Hotels and Activities, and the `skills` provider (from Step 6) for the **Activities** specialist — that leaf owns the `travel-guide` + `response-guardrails` skills (a handoff Coordinator can't carry a context provider — see the callout above);
 - the three specialist `Agent(...)`s — translate each `agents/<name>/agent.manifest.yaml` slice into `tools=[...]` and `context_providers=[...]` (function tools + toolbox → `tools`; `rag` → `search`). The Activities manifest also carries the two `skills`; attach the `skills` provider alongside its `search` provider (`context_providers=[search, skills]`). The Coordinator itself is a **pure router** — no tools, no context providers.
 
@@ -115,6 +115,16 @@ The pre-wired graph edges are what make this a handoff rather than a fixed pipel
 - `add_handoff(coordinator, [flights, hotels, activities])` lets the Coordinator pick a specialist.
 - `add_handoff(flights, [coordinator])` (and the hotel/activity edges) let specialists return control for synthesis or another branch.
 - `workflow.as_agent()` wraps the multi-agent runtime so the rest of the app treats it like a single hosted agent.
+
+**Why the pre-wired graph passes a `termination_condition` (and why it pairs with silent routing).** By default `HandoffBuilder` runs in a human-in-the-loop mode: after every Coordinator turn that isn't itself a handoff, it *parks* the workflow in `IDLE_WITH_PENDING_REQUESTS`, waiting for the next input to arrive as a **function-result** message correlated to that pending request (this is what the upstream [`handoff_workflow_as_agent.py`](https://github.com/microsoft/agent-framework/blob/main/python/samples/03-workflows/agents/handoff_workflow_as_agent.py) sample does — it hand-feeds each follow-up as a `function_result`). But our agent is **hosted**: the `ResponsesHostServer` delivers the traveler's next question as ordinary **text**, so a parked workflow rejects it with `Unexpected content type while awaiting request info responses` on the second turn. The fix is to make each turn *finish* (`IDLE`) instead of parking — the hosting layer then replays the whole history as a fresh run for the next question. The pre-wired condition terminates the turn once the **Coordinator produces its own answer** (the last message is the Coordinator's assistant text):
+
+```python
+termination_condition=lambda conversation: bool(conversation)
+and conversation[-1].role == "assistant"
+and conversation[-1].author_name == "Coordinator",
+```
+
+This is exactly why `COORDINATOR_INSTRUCTIONS` tells the Coordinator to **route silently**: the same condition is also checked *before* a specialist runs, so if the Coordinator narrated its handoff ("routing you to Flights…"), that assistant text would look like a finished Coordinator answer and terminate the turn **before** the specialist ever ran. A silent handoff carries no text, so it doesn't trip the condition and the specialist runs normally. See [Troubleshooting → *A follow-up question fails*](#a-follow-up-question-fails-unexpected-content-type-while-awaiting-request-info-responses) below.
 
 Because the toolbox is one bundle (web search + Code Interpreter + OctoTrip flights), Flights, Hotels, and Activities each receive the whole toolbox; the tighter boundary — flight search for Flights, web search for Hotels and Activities — is enforced by each specialist's instructions.
 
@@ -200,6 +210,24 @@ metadata:
 - `Can you keep the whole Lisbon weekend under 600 EUR including hotel and activities?` → expect Hotels and Activities, with currency math.
 
 ## Troubleshooting
+
+### A follow-up question fails (`Unexpected content type while awaiting request info responses`)
+
+The **first** question works, but asking a **second** question in the same conversation fails with a `response.failed` event:
+
+```json
+"error": {
+  "code": "server_error",
+  "message": "Unexpected content type while awaiting request info responses."
+}
+```
+
+This is the human-in-the-loop parking behaviour described under the pre-wired graph above. Without a `termination_condition`, `HandoffBuilder` ends each Coordinator turn in `IDLE_WITH_PENDING_REQUESTS`, expecting the next turn as a `function_result` correlated to that request — but the hosted `ResponsesHostServer` hands the follow-up over as plain **text**, which the parked workflow can't consume. Two things fix it together, and both are already in the checked-in graph:
+
+1. **A `termination_condition`** that ends the turn once the Coordinator gives its own answer, so each turn finishes `IDLE` and the hosting layer replays history for the next question (see the code under the pre-wired graph above).
+2. **Silent routing** in `COORDINATOR_INSTRUCTIONS` — the same condition also gates specialists, so a *narrated* handoff would end the turn before the specialist runs. The Coordinator must emit only the handoff (no text) when routing, and produce text only for the final answer or a clarifying question.
+
+If you hit this after customizing the graph, confirm the `HandoffBuilder` still passes the `termination_condition` **and** that your `COORDINATOR_INSTRUCTIONS` still tells the Coordinator to route silently — dropping either one brings the error back (drop only the silent-routing line and specialists get skipped instead). For the full request/response protocol behind the parked state, see the Agent Framework [handoff orchestration docs](https://learn.microsoft.com/agent-framework/user-guide/agent-orchestration/handoff) and the [`handoff_workflow_as_agent.py`](https://github.com/microsoft/agent-framework/blob/main/python/samples/03-workflows/agents/handoff_workflow_as_agent.py) sample.
 
 ### Coordinator doesn't hand off
 

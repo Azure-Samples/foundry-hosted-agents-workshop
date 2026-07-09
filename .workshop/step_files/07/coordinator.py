@@ -67,8 +67,11 @@ load_dotenv(override=True)
 #   - You are the only agent who talks to the traveler: when a specialist hands
 #     back because a detail is missing, ask the traveler yourself rather than
 #     routing straight back to that specialist (which can loop).
-#   - Ask a clarifying question only when a missing detail blocks the next step;
-#     keep the traveler informed when routing.
+#   - Route silently: when you hand a turn to a specialist, emit ONLY the handoff
+#     and no user-facing text (a narrated handoff ends the turn before the
+#     specialist runs — see the termination_condition note on the graph below).
+#     Write text only to deliver the final answer or ask a clarifying question,
+#     and ask one only when a missing detail blocks the next useful step.
 #   (The Coordinator is a pure router — the travel-guide PDF and response-guardrails
 #    ride on the Activities specialist, not here; see the skills TODO above.)
 COORDINATOR_INSTRUCTIONS = ""
@@ -141,10 +144,21 @@ def build_travel_coordinator() -> Agent:
     # The handoff graph is wired for you and exposed as a single agent. It refers
     # to flights/hotels/activities, so define those three specialists above first
     # (and fill in _build_search_provider) before this runs.
+    #
+    # termination_condition (pre-wired): each hosted turn must end IDLE, not
+    # IDLE_WITH_PENDING_REQUESTS. Without it HandoffBuilder parks after every
+    # Coordinator turn waiting for a function-result reply, and the next user
+    # question (delivered as plain text by the hosting layer) fails with
+    # "Unexpected content type while awaiting request info responses." We terminate
+    # once the Coordinator produces its own answer — which is why COORDINATOR_INSTRUCTIONS
+    # tells it to route silently (a narrated handoff would end the turn early).
     workflow = (
         HandoffBuilder(
             name="travelbuddy-runtime-handoff",
             participants=[coordinator, flights, hotels, activities],
+            termination_condition=lambda conversation: bool(conversation)
+            and conversation[-1].role == "assistant"
+            and conversation[-1].author_name == "Coordinator",
         )
         .with_start_agent(coordinator)
         .add_handoff(coordinator, [flights, hotels, activities])
