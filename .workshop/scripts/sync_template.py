@@ -217,15 +217,21 @@ def _guard_content_honors_sentinel(content: str) -> bool:
     co-occur with the skip mechanism (``proceed=false``) *and* a construct that
     consumes it (a fixed-string ``grep`` or a jq ``contains(``) rejects the weak
     case the reviewer flagged: the sentinel sitting in a comment or doc string
-    while the actual guard logic has been removed. Keep these tokens in sync with
-    the guard step in ``.github/workflows/advance-on-push.yml``.
+    while the actual guard logic has been removed. Comment-only lines are
+    stripped first so a sentinel mentioned purely in documentation (``# ...
+    [skip-advance] ...``) cannot satisfy the check — it must appear in executable
+    YAML/shell. Keep these tokens in sync with the guard step in
+    ``.github/workflows/advance-on-push.yml``.
     """
 
-    if SKIP_ADVANCE_SENTINEL not in content:
+    code = "\n".join(
+        line for line in content.splitlines() if not line.lstrip().startswith("#")
+    )
+    if SKIP_ADVANCE_SENTINEL not in code:
         return False
-    if "proceed=false" not in content:
+    if "proceed=false" not in code:
         return False
-    return "grep -qF" in content or "contains(" in content
+    return "grep -qF" in code or "contains(" in code
 
 
 def _guard_paths_synced(validated: Sequence[str]) -> bool:
@@ -295,12 +301,18 @@ def _mirror_path(path: str) -> None:
         raise SyncError(f"Failed to restore {path} from upstream:\n{stderr}")
 
 
-def _commit(message: str) -> bool:
-    """Commit staged changes. Returns False when there is nothing to commit."""
+def _commit(message: str, paths: Sequence[str]) -> bool:
+    """Commit staged changes under ``paths``. Returns False when there is nothing.
 
-    if not _git("diff", "--cached", "--name-only").stdout.strip():
+    The commit is scoped to ``paths`` (an explicit pathspec) so any unrelated
+    changes a participant happened to stage before running the sync are left out
+    of the ``[skip-advance]`` commit — mirroring how ``advance_step.py`` only
+    commits its own workshop-owned paths.
+    """
+
+    if not _git("diff", "--cached", "--name-only", "--", *paths).stdout.strip():
         return False
-    _git("commit", "-q", "-m", message)
+    _git("commit", "-q", "-m", message, "--", *paths)
     return True
 
 
@@ -359,7 +371,7 @@ def sync(
     print(_git("diff", "--cached", "--stat", "--", *validated).stdout.rstrip())
 
     if commit:
-        if _commit(COMMIT_MESSAGE):
+        if _commit(COMMIT_MESSAGE, validated):
             print(f"Committed: {COMMIT_MESSAGE}")
         if push:
             _git("push")

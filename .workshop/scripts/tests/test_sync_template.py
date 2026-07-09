@@ -131,6 +131,26 @@ def test_commit_carries_skip_advance_sentinel(upstream_repo: Path, instance_repo
 
 
 @_requires_git
+def test_commit_excludes_prestaged_unrelated_changes(upstream_repo: Path, instance_repo: Path):
+    # A participant stages their own work before running the sync. The sync
+    # commit must NOT sweep it under the [skip-advance] sentinel — it should
+    # stay staged and uncommitted, like advance_step.py's path-scoped commit.
+    _write(instance_repo, "travel_assistant/main.py", "my in-progress work")
+    _git(instance_repo, "add", "travel_assistant/main.py")
+
+    sync_template.sync(upstream_url=str(upstream_repo), ref="main", commit=True)
+
+    committed = _git(
+        instance_repo, "show", "--name-only", "--pretty=format:", "HEAD"
+    ).stdout
+    assert "travel_assistant/main.py" not in committed
+    assert ".workshop/new.txt" in committed
+    # The participant's staged change survives, still staged and uncommitted.
+    still_staged = _git(instance_repo, "diff", "--cached", "--name-only").stdout
+    assert "travel_assistant/main.py" in still_staged
+
+
+@_requires_git
 def test_dry_run_reports_without_mutating(upstream_repo: Path, instance_repo: Path, capsys):
     result = sync_template.sync(upstream_url=str(upstream_repo), ref="main", dry_run=True)
     out = capsys.readouterr().out
@@ -226,7 +246,10 @@ def test_aborts_when_upstream_guard_is_comment_only(tmp_path: Path, monkeypatch)
     _write(
         upstream,
         ".github/workflows/advance-on-push.yml",
-        "name: advance\n# this workflow once honored [skip-advance]\n",
+        "name: advance\n"
+        "# this workflow once honored [skip-advance]\n"
+        'grep -qF -- "$SOMETHING"\n'
+        'echo "proceed=false"\n',
     )
     _write(upstream, ".workshop/a.txt", "v2")
     _commit_all(upstream, "weak guard")
@@ -257,6 +280,14 @@ def test_guard_content_honors_sentinel_heuristic():
     assert sync_template._guard_content_honors_sentinel("# honors [skip-advance]\n") is False
     # Skip logic present but the sentinel was dropped.
     assert sync_template._guard_content_honors_sentinel('grep -qF x\nproceed=false\n') is False
+    # The false-confidence case: real skip logic (proceed=false + grep -qF) but
+    # the sentinel survives ONLY in a comment. Stripping comment lines rejects it.
+    comment_only_sentinel = (
+        "# once honored [skip-advance]\n"
+        'grep -qF -- "$SOMETHING"\n'
+        'echo "proceed=false"\n'
+    )
+    assert sync_template._guard_content_honors_sentinel(comment_only_sentinel) is False
 
 
 def test_normalized_paths_are_guard_detected():

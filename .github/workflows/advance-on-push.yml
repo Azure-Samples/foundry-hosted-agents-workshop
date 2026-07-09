@@ -66,21 +66,29 @@ jobs:
           #    carry a literal "[skip-advance]" marker in their message. Check
           #    EVERY commit in the push (not just the tip), so a sync commit that
           #    is not the tip — e.g. a manual push that bundles another commit
-          #    after it — still suppresses the advance. Prefer the event payload
-          #    (robust for force-push), fall back to the pushed range, then the
-          #    tip. Match as a fixed string so the brackets can't act as a regex
-          #    character class. Keep the marker in sync with SKIP_ADVANCE_SENTINEL.
+          #    after it — still suppresses the advance. The checks are additive,
+          #    not mutually exclusive: start with the event payload (robust for
+          #    force-push), but because that payload caps .commits[] at 20 entries,
+          #    fall back to the full pushed range and finally the tip whenever the
+          #    marker has not been found yet. Match as a fixed string so the
+          #    brackets can't act as a regex character class. Keep the marker in
+          #    sync with SKIP_ADVANCE_SENTINEL.
           SENTINEL="[skip-advance]"
           sentinel_found=false
           if [[ -f "$GITHUB_EVENT_PATH" ]] && command -v jq >/dev/null 2>&1; then
             if jq -e --arg s "$SENTINEL" '[ (.commits[]?, (.head_commit // empty)) | .message // empty | select(contains($s)) ] | length > 0' "$GITHUB_EVENT_PATH" >/dev/null; then
               sentinel_found=true
             fi
-          elif [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+          fi
+          if [[ "$sentinel_found" != "true" ]] \
+            && [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] \
+            && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
             if git log --format=%B "${BEFORE_SHA}..${GITHUB_SHA}" | grep -qF -- "$SENTINEL"; then
               sentinel_found=true
             fi
-          elif git log -1 --pretty=%B "$GITHUB_SHA" | grep -qF -- "$SENTINEL"; then
+          fi
+          if [[ "$sentinel_found" != "true" ]] \
+            && git log -1 --pretty=%B "$GITHUB_SHA" | grep -qF -- "$SENTINEL"; then
             sentinel_found=true
           fi
 
