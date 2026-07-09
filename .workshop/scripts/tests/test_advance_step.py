@@ -276,6 +276,57 @@ def test_reset_backs_up_and_returns_to_step_zero(workshop_repo):
     assert not (workshop_repo / "travel_assistant" / "old.txt").exists()
 
 
+def test_reset_current_relays_current_step_and_backs_up(workshop_repo, monkeypatch):
+    # Learner is on step 5 with local edits. reset-current re-lays the clean
+    # step 5 starter set and re-renders step 5's README, but STAYS on step 5.
+    _write_state(workshop_repo, 5)
+    _write_readme(workshop_repo, 5)
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("my edits", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "scratch.txt").write_text("remove me", encoding="utf-8")
+    _create_step_files(workshop_repo, 5, "step 5 starter")
+    github_env = workshop_repo / "github.env"
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+
+    result = advance_step.main(["--reset-current"])
+
+    assert result == 0
+    # Still on step 5 — never dropped back to 0.
+    assert json.loads((workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text())["current_step"] == 5
+    assert "# Synthetic step 5" in (workshop_repo / "README.md").read_text(encoding="utf-8")
+    # Learner edits backed up, then replaced by the clean starter; stray file gone.
+    backups = list((workshop_repo / ".workshop_instance" / "workshop_backups").glob("reset-current-05-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "stub.txt").read_text(encoding="utf-8") == "my edits"
+    assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "step 5 starter"
+    assert not (workshop_repo / "travel_assistant" / "scratch.txt").exists()
+    assert github_env.read_text(encoding="utf-8") == "NEW_STEP=5\n"
+
+
+@_requires_git
+def test_reset_current_auto_commit_creates_commit(workshop_repo):
+    _write_state(workshop_repo, 4)
+    _write_readme(workshop_repo, 4)
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 4 work", encoding="utf-8")
+    _create_step_files(workshop_repo, 4, "step 4 starter")
+    _git_init_with_identity(workshop_repo)
+
+    result = advance_step.main(["--reset-current", "--auto-commit"])
+
+    assert result == 0
+    log = _git(workshop_repo, "log", "-1", "--format=%s").stdout.strip()
+    assert log == "workshop: reset current step 4"
+
+
+def test_reset_and_reset_current_are_mutually_exclusive(workshop_repo, capsys):
+    _write_state(workshop_repo, 0)
+    _write_readme(workshop_repo, 0)
+
+    with pytest.raises(SystemExit):
+        advance_step.main(["--reset", "--reset-current"])
+    captured = capsys.readouterr()
+    assert "not allowed with argument" in captured.err or "argument --reset" in captured.err
+
+
 def test_init_lays_down_step_zero_without_backup(workshop_repo, monkeypatch):
     _write_state(workshop_repo, 0)
     _write_readme(workshop_repo, 0)

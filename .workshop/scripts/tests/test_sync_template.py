@@ -119,6 +119,8 @@ def test_participant_work_and_step_state_untouched(upstream_repo: Path, instance
     assert (
         instance_repo / ".workshop_instance" / ".workshop-state.json"
     ).read_text(encoding="utf-8") == '{"current_step": 3}\n'
+    # Syncing never re-renders README — that is the separate "reset current step"
+    # flow's job. The rendered README is left exactly as it was.
     assert (instance_repo / "README.md").read_text(encoding="utf-8") == "<!-- step: 3 -->\n"
 
 
@@ -175,6 +177,148 @@ def test_self_sync_is_a_noop(upstream_repo: Path, instance_repo: Path):
     assert (instance_repo / ".workshop" / "a.txt").read_text(encoding="utf-8") == "v1"
 
 
+@_requires_git
+def test_allow_self_never_pushes_to_the_template(upstream_repo: Path, instance_repo: Path):
+    # --allow-self bypasses the no-op self-guard (so the mirror runs), but a sync
+    # must NEVER push back to the template it synced from. The commit is created
+    # locally; the push is refused before it can reach the template's origin.
+    _git(instance_repo, "remote", "add", "origin", str(upstream_repo))
+
+    with pytest.raises(sync_template.SyncError, match="Refusing to push"):
+        sync_template.sync(
+            upstream_url=str(upstream_repo),
+            ref="main",
+            allow_self=True,
+            commit=True,
+            push=True,
+        )
+
+    # The mirror + local commit still happened (allow_self permits that)...
+    assert (instance_repo / ".workshop" / "a.txt").read_text(encoding="utf-8") == "v2"
+    message = _git(instance_repo, "log", "-1", "--pretty=%B").stdout
+    assert sync_template.SKIP_ADVANCE_SENTINEL in message
+    # ...but nothing was pushed: the upstream template has no new commits from us.
+    upstream_log = _git(upstream_repo, "log", "--oneline").stdout
+    assert sync_template.SKIP_ADVANCE_SENTINEL not in upstream_log
+
+
+@_requires_git
+def test_sync_never_rerenders_readme(upstream_repo: Path, instance_repo: Path):
+    # Syncing refreshes only the machinery; it must never touch README.md, even
+    # when committing. Re-rendering the current step is the separate reset flow.
+    sync_template.sync(upstream_url=str(upstream_repo), ref="main", commit=True)
+
+    assert (instance_repo / "README.md").read_text(encoding="utf-8") == "<!-- step: 3 -->\n"
+    committed = _git(
+        instance_repo, "show", "--name-only", "--pretty=format:", "HEAD"
+    ).stdout
+    assert "README.md" not in committed
+
+
+@_requires_git
+def test_skip_workflows_excludes_workflow_files(tmp_path: Path, monkeypatch, capsys):
+    # Upstream changes both a workflow file and a non-workflow .github file plus a
+    # .workshop file. --skip-workflows must sync everything EXCEPT .github/workflows/.
+    upstream = tmp_path / "sw_upstream"
+    _init_repo(upstream)
+    _write(upstream, ".workshop/a.txt", "v2")
+    _write(upstream, ".github/dependabot.yml", "version: 2\n")
+    _write(upstream, ".github/workflows/ci.yml", "name: ci-v2\n")
+    _commit_all(upstream, "upstream")
+
+    instance = tmp_path / "sw_instance"
+    _init_repo(instance)
+    _write(instance, ".workshop/a.txt", "v1")
+    _write(instance, ".github/workflows/ci.yml", "name: ci-v1\n")
+    _commit_all(instance, "instance")
+    monkeypatch.setattr(sync_template, "REPO_ROOT", instance)
+
+    result = sync_template.sync(
+        upstream_url=str(upstream), ref="main", commit=True, skip_workflows=True
+    )
+    assert result == 0
+
+    # Non-workflow trees synced...
+    assert (instance / ".workshop" / "a.txt").read_text(encoding="utf-8") == "v2"
+    assert (instance / ".github" / "dependabot.yml").read_text(encoding="utf-8") == "version: 2\n"
+    # ...but the workflow file is left exactly as it was.
+    assert (instance / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8") == "name: ci-v1\n"
+
+    committed = _git(
+        instance, "show", "--name-only", "--pretty=format:", "HEAD"
+    ).stdout
+    assert ".github/dependabot.yml" in committed
+    assert ".github/workflows/ci.yml" not in committed
+
+    # The user is told the skipped workflow differs and how to adopt it.
+    out = capsys.readouterr().out
+    assert "workflow" in out.lower()
+
+
+@_requires_git
+def test_skip_workflows_bypasses_guard_verification(tmp_path: Path, monkeypatch):
+    # Upstream ships a broken advance guard. Normally the sync refuses to adopt a
+    # .github/ tree whose guard doesn't honor the sentinel — but --skip-workflows
+    # never adopts workflow files, so verification is bypassed and the local guard
+    # survives untouched.
+    upstream = tmp_path / "swg_upstream"
+    _init_repo(upstream)
+    _write(upstream, ".github/workflows/advance-on-push.yml", "name: advance\n# no guard\n")
+    _write(upstream, ".workshop/a.txt", "v2")
+    _commit_all(upstream, "broken guard")
+
+    instance = tmp_path / "swg_instance"
+    _init_repo(instance)
+    good_guard = (
+        'SENTINEL="[skip-advance]"\n'
+        'grep -qF -- "$SENTINEL" && echo "proceed=false"\n'
+    )
+    _write(instance, ".github/workflows/advance-on-push.yml", good_guard)
+    _write(instance, ".workshop/a.txt", "v1")
+    _commit_all(instance, "instance")
+    monkeypatch.setattr(sync_template, "REPO_ROOT", instance)
+
+    # Without skip_workflows this would raise (broken upstream guard); with it, the
+    # sync proceeds and the local guard is preserved.
+    assert sync_template.sync(upstream_url=str(upstream), ref="main", skip_workflows=True) == 0
+    assert (instance / ".workshop" / "a.txt").read_text(encoding="utf-8") == "v2"
+    assert (
+        instance / ".github" / "workflows" / "advance-on-push.yml"
+    ).read_text(encoding="utf-8") == good_guard
+
+
+@_requires_git
+def test_skip_workflows_drops_paths_inside_workflows(tmp_path: Path, monkeypatch, capsys):
+    # Targeting a path INSIDE .github/workflows/ together with --skip-workflows
+    # must be a no-op: the workflow file is neither mirrored nor committed, and
+    # guard verification (which is skipped when skipping workflows) can never be
+    # used to sneak a broken workflow in through a direct --paths target.
+    upstream = tmp_path / "swd_upstream"
+    _init_repo(upstream)
+    _write(upstream, ".github/workflows/ci.yml", "name: ci-v2\n")
+    _commit_all(upstream, "upstream")
+
+    instance = tmp_path / "swd_instance"
+    _init_repo(instance)
+    _write(instance, ".github/workflows/ci.yml", "name: ci-v1\n")
+    _commit_all(instance, "instance")
+    monkeypatch.setattr(sync_template, "REPO_ROOT", instance)
+
+    result = sync_template.sync(
+        upstream_url=str(upstream),
+        ref="main",
+        paths=[".github/workflows/ci.yml"],
+        commit=True,
+        skip_workflows=True,
+    )
+    assert result == 0
+    # The workflow file was left untouched and nothing was committed.
+    assert (instance / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8") == "name: ci-v1\n"
+    assert not _git(instance, "diff", "--cached", "--name-only").stdout.strip()
+    log = _git(instance, "log", "--oneline").stdout
+    assert sync_template.SKIP_ADVANCE_SENTINEL not in log
+
+
 def test_validate_paths_rejects_protected_and_escaping():
     for bad in (".workshop_instance", "travel_assistant", "README.md", ".env"):
         with pytest.raises(sync_template.SyncError):
@@ -183,9 +327,6 @@ def test_validate_paths_rejects_protected_and_escaping():
         sync_template._validate_paths(["../outside"])
     with pytest.raises(sync_template.SyncError):
         sync_template._validate_paths([])
-
-
-def test_validate_paths_accepts_defaults():
     assert sync_template._validate_paths([".workshop", ".github"]) == [".workshop", ".github"]
     assert sync_template._validate_paths([".workshop/"]) == [".workshop"]
 

@@ -822,6 +822,66 @@ def _reset(*, dry_run: bool, auto_commit: bool) -> int:
     return 0
 
 
+def _plan_relay_current(current_step: int) -> list[str]:
+    """Return human-readable reset-current actions for dry-run output."""
+
+    name = STEP_TITLES.get(current_step, "")
+    label = f"step {current_step}: {name}" if name else f"step {current_step}"
+    return [
+        "Would back up travel_assistant/ and workshop root files to "
+        f".workshop_instance/workshop_backups/reset-current-{current_step:02d}-<timestamp>/.",
+        "Would clear travel_assistant/ and re-lay the clean starter files for "
+        f"{label} from .workshop/step_files/{_step_dir_name(current_step)}/.",
+        f"Would re-render README.md for {label}.",
+        f"Would leave {STATE_FILE} unchanged at current_step {current_step}.",
+        f"Would export NEW_STEP={current_step} if GITHUB_ENV is set.",
+    ]
+
+
+def _relay_current(*, dry_run: bool, auto_commit: bool) -> int:
+    """Re-lay the *current* step's clean starter files and re-render its README.
+
+    Unlike ``--reset`` (which drops back to step 0), this keeps the learner on
+    their current step but discards local edits to travel_assistant/ in favor of
+    the canonical starter files, after backing that work up. It is the companion
+    to a template sync: sync refreshes the machinery, reset-current refreshes the
+    current step's delivery files and instructions.
+    """
+
+    current_step = _load_state()
+    _validate_state_sync(current_step, _read_readme_marker())
+
+    if dry_run:
+        print(f"DRY RUN: resetting current step {current_step} to its clean starter files")
+        for action in _plan_relay_current(current_step):
+            print(action)
+        if auto_commit:
+            print(
+                "Would auto-commit workshop-owned paths with message "
+                f"'workshop: reset current step {current_step}'."
+            )
+        return 0
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    backup_destination = _path(BACKUPS_DIR) / f"reset-current-{current_step:02d}-{timestamp}"
+    if _backup_travel_assistant(backup_destination, skip_if_empty=False):
+        print(f"Backed up travel_assistant/ to {backup_destination.relative_to(REPO_ROOT)}")
+    if _backup_root_targets(backup_destination):
+        print(f"Backed up workshop root files to {backup_destination.relative_to(REPO_ROOT)}")
+
+    _lay_down_step_files(current_step, clear_existing=True)
+    _write_text(_path(README_FILE), _render_readme(current_step))
+    # State is already on current_step; rewrite it so schema/format stays canonical.
+    _write_state(current_step)
+    _export_new_step(current_step)
+    name = STEP_TITLES.get(current_step, "")
+    label = f"step {current_step}: {name}" if name else f"step {current_step}"
+    print(f"Reset current step to clean starter files: {label}")
+    if auto_commit:
+        _auto_commit(f"workshop: reset current step {current_step}")
+    return 0
+
+
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     """Parse command-line arguments."""
 
@@ -839,6 +899,17 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--reset", action="store_true", help="Reset the workshop to step 0.")
+    mode_group.add_argument(
+        "--reset-current",
+        dest="reset_current",
+        action="store_true",
+        help=(
+            "Re-lay the CURRENT step's clean starter files and re-render its "
+            "README, backing up travel_assistant/ first. Stays on the current "
+            "step (unlike --reset, which returns to step 0). Pairs with a "
+            "template sync when you want the current step refreshed too."
+        ),
+    )
     mode_group.add_argument(
         "--init",
         action="store_true",
@@ -877,6 +948,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _init(dry_run=args.dry_run)
         if args.reset:
             return _reset(dry_run=args.dry_run, auto_commit=args.auto_commit)
+        if args.reset_current:
+            return _relay_current(dry_run=args.dry_run, auto_commit=args.auto_commit)
         if args.on_push:
             return _advance_on_push(dry_run=args.dry_run)
         return _advance(args.expected, dry_run=args.dry_run, auto_commit=args.auto_commit)
