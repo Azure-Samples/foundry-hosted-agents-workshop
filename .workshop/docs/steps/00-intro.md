@@ -273,6 +273,22 @@ python .workshop/scripts/advance_step.py --reset --auto-commit
 
 Your previous `travel_assistant/` is preserved under `.workshop_instance/workshop_backups/reset-<timestamp>/`.
 
+**Pull the latest workshop machinery (without advancing):**
+
+```bash
+python .workshop/scripts/sync_template.py --auto-commit   # add --push to push too
+```
+
+Occasionally the upstream template ships fixes to the workshop machinery (the authoring material under `.workshop/` and the GitHub configuration under `.github/`). This pulls those into your instance **without moving to the next step** and without touching your `travel_assistant/`, your `.workshop_instance/` state, `README.md`, or `.env`. The commit carries a `[skip-advance]` marker, so pushing it never advances you. A local run also refreshes `.github/workflows/`; the automated CI sync deliberately skips workflow files so it stays tokenless (no Personal Access Token required).
+
+**Reset the current step (re-lay its clean starter files):**
+
+```bash
+python .workshop/scripts/advance_step.py --reset-current --auto-commit
+```
+
+Re-lays the **current** step's clean starter files and re-renders its `README.md`, staying on the current step — unlike `--reset`, which returns you to step 0. Your previous `travel_assistant/` is backed up under `.workshop_instance/workshop_backups/reset-current-<step>-<timestamp>/` first. Pair it with a sync when you want the current step's delivery refreshed too: **sync first, then reset the current step**. (If you sync just before advancing, you don't need this — advancing already lays down fresh files.)
+
 **Re-run preflight:**
 
 ```bash
@@ -283,12 +299,14 @@ python .workshop/scripts/preflight.py
 uv run python .workshop/scripts/preflight.py
 ```
 
-**Shortcuts (optional):** the repo ships a `Makefile` with three aliases:
+**Shortcuts (optional):** the repo ships a `Makefile` with these aliases:
 
 ```bash
-make advance     # advance to the next step (auto-commits workshop paths)
-make reset       # reset to step 0 (auto-commits workshop paths)
-make preflight   # run environment checks
+make advance        # advance to the next step (auto-commits workshop paths)
+make reset          # reset to step 0 (auto-commits workshop paths)
+make reset-current  # re-lay the current step's clean files (auto-commits)
+make preflight      # run environment checks
+make sync-template  # pull latest .workshop/ + .github/ from the template
 ```
 
 When `make` is not available (e.g. on a clean Windows install), just run the equivalent `python .workshop/scripts/...` commands above.
