@@ -21,4 +21,4 @@ After the **Advance workshop on push to main** Action finishes, run **`git pull`
 
 > **Prefer to stay local?** Run `python .workshop/scripts/advance_step.py --expected-current-step {{CURRENT_STEP}} --auto-commit` (or `make advance`) instead. That advances locally and records it in the same commit, so your next push won't advance again. See [Working fully locally](.workshop/docs/steps/00-intro.md#5-working-fully-locally-no-github-actions).
 
-<sub>Made a mistake? Use the [Reset workshop](https://github.com/{{OWNER}}/{{REPO}}/actions/workflows/reset-workshop.yml) workflow, or run `python .workshop/scripts/advance_step.py --reset --auto-commit` locally.</sub>
+<sub>Made a mistake on this step? Re-lay its clean starter files with the [Reset current step](https://github.com/{{OWNER}}/{{REPO}}/actions/workflows/reset-current-step.yml) workflow, or run `python .workshop/scripts/advance_step.py --reset-current --auto-commit` locally — you stay on this step. To start the whole workshop over instead, use [Reset workshop](https://github.com/{{OWNER}}/{{REPO}}/actions/workflows/reset-workshop.yml) or `python .workshop/scripts/advance_step.py --reset --auto-commit`.</sub>
