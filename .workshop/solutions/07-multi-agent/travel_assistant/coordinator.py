@@ -305,7 +305,7 @@ def build_travel_coordinator() -> Agent:
     flights = Agent(
         client=client,
         name="FlightsSpecialist",
-        description="Flight timing, airports, routes, layovers, weather risk, and fares.",
+        description="Handles flight timing, routing, airport, weather-risk, and currency questions.",
         instructions=FLIGHTS_INSTRUCTIONS,
         tools=[get_weather, get_local_time, convert_currency, toolbox],
         default_options={"store": False},
@@ -315,7 +315,7 @@ def build_travel_coordinator() -> Agent:
     hotels = Agent(
         client=client,
         name="HotelsSpecialist",
-        description="Lodging areas, budgets, amenities, and neighbourhood trade-offs.",
+        description="Handles hotel area, budget, amenity, and lodging trade-off questions.",
         instructions=HOTELS_INSTRUCTIONS,
         tools=[convert_currency, toolbox],
         context_providers=[search],
@@ -327,7 +327,7 @@ def build_travel_coordinator() -> Agent:
     activities = Agent(
         client=client,
         name="ActivitiesSpecialist",
-        description="Experiences, day trips, itineraries, and the final PDF trip guide.",
+        description="Handles experiences, day trips, local guidance, and itinerary-building questions.",
         instructions=ACTIVITIES_INSTRUCTIONS,
         tools=[toolbox],
         context_providers=[search, skills],
@@ -338,14 +338,16 @@ def build_travel_coordinator() -> Agent:
     # bidirectional edges: every round the Coordinator picks the next specialist or
     # terminates with the final answer, then the workflow completes (IDLE) — it never
     # parks on a request_info, so a follow-up question in the same conversation is just
-    # the next run against the restored history. max_rounds is a whole-conversation
-    # safety cap against a manager that never terminates; normal turns end when the
-    # Coordinator decides the plan is complete.
+    # the next run against the restored history. max_rounds caps the number of
+    # orchestrator rounds; note the round counter is checkpoint-restored, so the cap is
+    # CUMULATIVE across the whole hosted conversation, not per turn. A normal turn ends
+    # when the Coordinator terminates well before the cap; 40 leaves ample headroom for a
+    # multi-turn planning session while still stopping a manager that never terminates.
     workflow = (
         GroupChatBuilder(
             participants=[flights, hotels, activities],
             orchestrator_agent=coordinator,
-            max_rounds=20,
+            max_rounds=40,
         )
         .build()
     )

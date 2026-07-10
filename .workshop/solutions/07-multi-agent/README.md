@@ -1,12 +1,12 @@
 > ⚠️ This is a reference solution. Workshop participants should follow the steps in the root README and only consult this if stuck.
 
-# Solution 07 — TravelBuddy as a runtime multi-agent handoff
+# Solution 07 — TravelBuddy as a manager-led group chat
 
-Builds on Step 6: keeps every carried capability (function tools, Foundry Toolbox, RAG, the local travel-guide Skill, and the required Foundry response-guardrails Skill) and splits TravelBuddy into a **Coordinator** plus **Flights / Hotels / Activities** specialists wired with `HandoffBuilder`. The Coordinator routes each turn to the specialist that owns it; specialists hand back for synthesis. The whole graph is exposed as one agent via `workflow.as_agent()`, so hosting is unchanged.
+Builds on Step 6: keeps every carried capability (function tools, Foundry Toolbox, RAG, the local travel-guide Skill, and the required Foundry response-guardrails Skill) and splits TravelBuddy into a **Coordinator** (the group chat *manager*) plus **Flights / Hotels / Activities** specialists wired with `GroupChatBuilder`. Each round the Coordinator picks which specialist speaks next; when the plan is complete it terminates and writes the final answer. The whole graph is exposed as one agent via `workflow.as_agent()`, so hosting is unchanged.
 
 ## Layout
 
-- `travel_assistant/` — the agent code. `coordinator.py` builds the handoff graph and each specialist gets a sliced capability set; the Activities specialist downloads the Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider` (a runtime-handoff Coordinator can't carry a context provider, so the skills ride on the Activities leaf). `agents/{flights,hotels,activities}/` hold per-specialist `agent.yaml` + `agent.manifest.yaml` slices that document each role's tool/RAG/skill boundary. Snapshotted by `azd ai agent init`.
+- `travel_assistant/` — the agent code. `coordinator.py` builds the group chat and each specialist gets a sliced capability set; the Activities specialist downloads the Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider` (the group chat manager returns structured output, so it can't carry a context provider — the skills ride on the Activities specialist). `agents/{flights,hotels,activities}/` hold per-specialist `agent.yaml` + `agent.manifest.yaml` slices that document each role's tool/RAG/skill boundary. Snapshotted by `azd ai agent init`.
 - `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` (from Step 5).
 - `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/` (from Step 6). Never deployed — `azd ai agent init` snapshots only `travel_assistant/`.
 - `travel_toolbox/` — the toolbox definition (`toolbox.yaml`).
@@ -16,7 +16,7 @@ Builds on Step 6: keeps every carried capability (function tools, Foundry Toolbo
 
 | Specialist | Tools | RAG | Skill |
 | --- | --- | --- | --- |
-| Coordinator | — | — | — (pure router) |
+| Coordinator | — | — | — (manager) |
 | Flights | `get_weather`, `get_local_time`, `convert_currency`, toolbox (flight fares) | — | — |
 | Hotels | `convert_currency`, toolbox (web) | destinations index | — |
 | Activities | toolbox (web/reference) | destinations index | travel-guide, response-guardrails |
@@ -30,7 +30,7 @@ Builds on Step 6: keeps every carried capability (function tools, Foundry Toolbo
 5. Upload the Foundry skill once (re-run after editing its `SKILL.md`): `python foundry_skills/provision_skills.py`.
 6. Start the hosted Responses server: `cd travel_assistant && python main.py`.
 
-Try: `Help me plan a 5-day Tokyo trip: flights from Lisbon, a hotel near Shibuya under €200/night, and a day-trip suggestion.` — expect handoffs across all three specialists.
+Try: `Help me plan a 5-day Tokyo trip: flights from Lisbon, a hotel near Shibuya under €200/night, and a day-trip suggestion.` — expect the manager to consult all three specialists.
 
 Back to workshop: [../../README.md](../../README.md)
 
@@ -40,4 +40,4 @@ None.
 
 ## Upstream attribution
 
-No single upstream sample; the handoff pattern follows the Agent Framework multi-agent [handoff orchestration](https://learn.microsoft.com/agent-framework/user-guide/agent-orchestration/handoff) docs.
+No single upstream sample; the group chat pattern follows the Agent Framework multi-agent [group chat orchestration](https://learn.microsoft.com/agent-framework/user-guide/agent-orchestration/group-chat) docs.

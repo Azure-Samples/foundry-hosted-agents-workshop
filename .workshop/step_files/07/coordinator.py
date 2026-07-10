@@ -128,7 +128,7 @@ def build_travel_coordinator() -> Agent:
     # e.g.:
     #   flights = Agent(
     #       client=client, name="FlightsSpecialist",
-    #       description="Flight timing, airports, routes, layovers, weather risk, and fares.",
+    #       description="Handles flight timing, routing, airport, weather-risk, and currency questions.",
     #       instructions=FLIGHTS_INSTRUCTIONS,
     #       tools=[get_weather, get_local_time, convert_currency, toolbox],
     #       default_options={"store": False},
@@ -147,13 +147,14 @@ def build_travel_coordinator() -> Agent:
     # terminates with the final answer, then the workflow completes (IDLE). Because it
     # never parks on a request_info, a follow-up question in the same conversation is
     # just the next run against the restored history — no "Unexpected content type"
-    # error. max_rounds is a whole-conversation safety cap against a manager that never
-    # terminates; normal turns end when the Coordinator decides the plan is complete.
+    # error. max_rounds caps the orchestrator rounds; the counter is checkpoint-restored,
+    # so the cap is CUMULATIVE across the whole conversation, not per turn. 40 leaves
+    # ample headroom for a multi-turn session while still stopping a runaway manager.
     workflow = (
         GroupChatBuilder(
             participants=[flights, hotels, activities],
             orchestrator_agent=coordinator,
-            max_rounds=20,
+            max_rounds=40,
         )
         .build()
     )

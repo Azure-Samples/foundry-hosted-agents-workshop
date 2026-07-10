@@ -2,7 +2,7 @@
 
 > **Goal:** split TravelBuddy into a **Coordinator** (the group chat *manager*) plus **Flights / Hotels / Activities** specialists. Each round the Coordinator picks which specialist speaks next, then synthesizes one final answer — while the Coordinator and its specialists each reuse a slice of the Step 6 tools, toolbox, RAG, and skills.
 
-> **Tip — give this step a capable model.** Step 7 is the most demanding step for the model: the manager and three specialists share one conversation, and every round replays the accumulated history plus each specialist's tool output, so the context grows fast. A small `-mini` deployment (for example `gpt-4o-mini`) often picks the wrong speaker, terminates too early, or loops. If routing misbehaves, point `AZURE_AI_MODEL_DEPLOYMENT_NAME` at a full-size model — for example a `gpt-5.4` deployment rather than `gpt-5.4-mini` — and re-run. It's a deployment-name change only; no code changes.
+> **Tip — give this step a capable model.** Step 7 is the most demanding step for the model: the manager and three specialists share one conversation, and every round replays the accumulated history plus each specialist's tool-grounded response, so the context grows fast. A small `-mini` deployment (for example `gpt-4o-mini`) often picks the wrong speaker, terminates too early, or loops. If routing misbehaves, point `AZURE_AI_MODEL_DEPLOYMENT_NAME` at a full-size model — for example a `gpt-5.4` deployment rather than `gpt-5.4-mini` — and re-run. It's a deployment-name change only; no code changes.
 
 ## What you'll learn
 
@@ -115,7 +115,7 @@ The pre-wired builder is what makes this a manager-led chat rather than a fixed 
 
 - `orchestrator_agent=coordinator` makes the Coordinator the manager that selects the next speaker each round.
 - `participants=[flights, hotels, activities]` are the specialists the manager can pick from.
-- `max_rounds=20` is a whole-conversation safety cap against a manager that never terminates — normal turns end when the manager decides the plan is complete.
+- `max_rounds=40` caps the number of orchestrator rounds. The round counter is checkpoint-restored, so this cap is **cumulative across the whole conversation**, not per turn — a normal turn terminates well before it, and `40` leaves ample headroom for a multi-turn planning session while still stopping a manager that never terminates. (A very long conversation could eventually exhaust it; if a late follow-up returns a bare "max rounds reached" result, start a fresh conversation or raise the cap.)
 - `workflow.as_agent()` wraps the multi-agent runtime so the rest of the app treats it like a single hosted agent.
 
 **Why group chat is a clean fit for a hosted, multi-turn agent.** Each round the manager either selects a speaker or **terminates** — and when it terminates, the workflow simply *completes* (goes idle) and yields the final answer. It never parks waiting for a special reply. So when the traveler asks a **follow-up** in the same conversation, the hosting layer just restores the conversation and runs the manager again against the new message — the chat continues naturally. (This is the key difference from a peer-to-peer handoff, which pauses for human-in-the-loop input after each turn and needs extra care to resume cleanly when hosted.)
