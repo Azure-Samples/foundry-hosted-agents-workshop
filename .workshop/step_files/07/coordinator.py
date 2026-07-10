@@ -1,4 +1,4 @@
-"""TravelBuddy multi-agent Coordinator — build the handoff graph.
+"""TravelBuddy multi-agent Coordinator — build the group chat.
 
 Fill in the TODOs below by reading the delivered slices, following
 docs/steps/07-multi-agent.md.
@@ -9,7 +9,8 @@ boundary, but nothing loads them at runtime. **This file is the executable
 source of truth** — you translate each slice into code here:
 
 - ``agents/<name>/agent.yaml`` -> the ``*_INSTRUCTIONS`` constant below
-  (its ``instructions:`` block).
+  (its ``instructions:`` block) and the specialist's ``description=`` argument
+  (its ``description:`` line).
 - ``agents/<name>/agent.manifest.yaml`` -> that specialist's ``tools=[...]`` and
   ``context_providers=[...]`` arguments (its ``tools`` / ``rag`` / ``skills``).
 
@@ -28,7 +29,7 @@ import os
 from agent_framework import Agent
 from agent_framework.azure import AzureAISearchContextProvider
 from agent_framework.foundry import FoundryChatClient
-from agent_framework.orchestrations import HandoffBuilder
+from agent_framework.orchestrations import GroupChatBuilder
 from agent_framework_foundry_hosting import FoundryToolbox
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
@@ -45,11 +46,11 @@ load_dotenv(override=True)
 # Foundry response-guardrails skill in Step 6, serve it here too so Activities can
 # guardrail its answer; if you skipped it (no public-network Foundry project), serve
 # only the local skill and drop the response-guardrails line from ACTIVITIES_INSTRUCTIONS.
-# Why Activities and not the Coordinator? In a runtime handoff the Coordinator issues
-# the handoff tool calls and is re-invoked after each hand-back, so it can't also
-# carry a context provider — the extra tool stream breaks the store=False history
-# replay. The skills therefore ride on a leaf specialist. Step 8's workflow adds a
-# dedicated finalize node that CAN own the deliverable.
+# Why Activities and not the Coordinator? The Coordinator is the group chat MANAGER: it
+# returns a structured next-speaker/terminate decision each round, so it can't also
+# carry tools or a tool-producing context provider. The skills therefore ride on the
+# Activities participant. Step 8's workflow adds a dedicated finalize node that CAN own
+# the deliverable.
 
 
 # --- Instruction constants --------------------------------------------------
@@ -57,25 +58,25 @@ load_dotenv(override=True)
 # The Coordinator has NO slice — you write it. These are what the runtime uses;
 # keep the specialist ones aligned with their slices.
 #
-# TODO: write COORDINATOR_INSTRUCTIONS (the router's brief). Cover:
-#   - Role: understand the request, route to the right specialist, synthesize one answer.
+# TODO: write COORDINATOR_INSTRUCTIONS (the manager's brief). Cover:
+#   - Role: you are the manager of a group chat between the three specialists —
+#     read the conversation, pick who speaks next, or terminate with the final answer.
 #   - Routing rules (one line each, matching each slice's `description`):
 #       Flights -> timing, airports, routes, layovers, weather risk, fares
 #       Hotels  -> lodging areas, budgets, amenities, neighbourhood trade-offs
-#       Activities -> experiences, day trips, destination guidance, itineraries
-#   - Full trip: hand off to each relevant specialist, then reconcile into one plan.
-#   - You are the only agent who talks to the traveler: when a specialist hands
-#     back because a detail is missing, ask the traveler yourself rather than
-#     routing straight back to that specialist (which can loop).
-#   - Route silently: when you hand a turn to a specialist, emit ONLY the handoff
-#     and no user-facing text (a narrated handoff ends the turn before the
-#     specialist runs — see the termination_condition note on the graph below).
-#     Write text only to deliver the final answer or ask a clarifying question,
-#     and ask one only when a missing detail blocks the next useful step.
-#   (The Coordinator is a pure router — the travel-guide PDF and response-guardrails
+#       Activities -> experiences, day trips, destination guidance, itineraries, PDF guide
+#   - Full trip: gather flights and hotels first, then choose Activities LAST so it
+#     folds everything into the itinerary, produces the PDF, and runs the guardrails check.
+#   - Terminate when the request is fully answered, and when you do, write the final
+#     answer for the traveler — include the Activities guarded guide and its PDF link
+#     verbatim (don't rewrite or drop them).
+#   - If a blocking detail is missing, terminate and ask the traveler that one question
+#     directly, rather than looping a specialist.
+#   - You never call tools yourself — only the specialists do; you route and synthesize.
+#   (The Coordinator is the manager — the travel-guide PDF and response-guardrails
 #    ride on the Activities specialist, not here; see the skills TODO above.)
 COORDINATOR_INSTRUCTIONS = ""
-FLIGHTS_INSTRUCTIONS = ""      # TODO: from agents/flights/agent.yaml — flights only; hand back for lodging/activities/full plan.
+FLIGHTS_INSTRUCTIONS = ""      # TODO: from agents/flights/agent.yaml — flights only; report findings, then stop.
 HOTELS_INSTRUCTIONS = ""       # TODO: from agents/hotels/agent.yaml — lodging only; use destinations RAG + toolbox web search + currency.
 ACTIVITIES_INSTRUCTIONS = ""   # TODO: from agents/activities/agent.yaml — experiences, day trips, itinerary; toolbox web search + destinations RAG + the travel-guide/response-guardrails skills.
 
@@ -88,7 +89,7 @@ def _build_search_provider(credential) -> AzureAISearchContextProvider:
 
 
 def build_travel_coordinator() -> Agent:
-    """Build the Coordinator + specialists handoff and expose it as one agent."""
+    """Build the Coordinator + specialists group chat and expose it as one agent."""
     credential = DefaultAzureCredential()
     client = FoundryChatClient(
         project_endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
@@ -101,70 +102,59 @@ def build_travel_coordinator() -> Agent:
     search = _build_search_provider(credential)
     # TODO: build the skills provider from your Step 6 code (local travel-guide,
     # plus the Foundry response-guardrails skill only if you built it in Step 6).
-    # It belongs to the Activities specialist below — that leaf owns the final PDF
-    # guide + guardrails (the handoff Coordinator can't carry a context provider).
+    # It belongs to the Activities specialist below — that participant owns the final
+    # PDF guide + guardrails (the manager Coordinator can't carry a context provider).
     # skills = ...
 
-    # Every participant MUST set require_per_service_call_history_persistence=True.
-    # A handoff fires mid-turn (before the handoff tool call resolves), so without
-    # the flag that in-flight call is dropped and HandoffBuilder.build() raises
-    # ValueError. Set it on the Coordinator and all three specialists.
-    # Carry default_options={"store": False} over from every earlier step: the
-    # hosting layer manages history, so don't persist responses server-side. Set
-    # it on the Coordinator and all three specialists below.
-    # The Coordinator is a pure router: no tools, no context providers (attaching a
-    # context provider here would break the store=False handoff replay).
+    # Carry default_options={"store": False} over from every earlier step: the hosting
+    # layer manages history, so don't persist responses server-side. Set it on the
+    # Coordinator and all three specialists below.
+    # The Coordinator is the group chat MANAGER (orchestrator_agent): it returns a
+    # structured next-speaker/terminate decision each round, so it has no tools and no
+    # context providers.
     coordinator = Agent(
         client=client,
         name="Coordinator",
         instructions=COORDINATOR_INSTRUCTIONS,
-        require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )
 
     # TODO: build the three specialists. Read each agents/<name>/agent.manifest.yaml
     # to see the exact capability slice, then translate it to Agent(...) arguments:
-    #   - `tools:`  -> tools=[...]              (function tools + the toolbox)
-    #   - `rag:`    -> context_providers=[search]   (the destinations index)
-    #   - `skills:` -> context_providers=[search, skills]   (Activities only)
+    #   - `description:` (agent.yaml) -> description=...   (feeds the manager's routing prompt)
+    #   - `tools:`  -> tools=[...]                         (function tools + the toolbox)
+    #   - `rag:`    -> context_providers=[search]          (the destinations index)
+    #   - `skills:` -> context_providers=[search, skills]  (Activities only)
     # e.g.:
     #   flights = Agent(
-    #       client=client, name="FlightsSpecialist", instructions=FLIGHTS_INSTRUCTIONS,
+    #       client=client, name="FlightsSpecialist",
+    #       description="Flight timing, airports, routes, layovers, weather risk, and fares.",
+    #       instructions=FLIGHTS_INSTRUCTIONS,
     #       tools=[get_weather, get_local_time, convert_currency, toolbox],
-    #       require_per_service_call_history_persistence=True,
     #       default_options={"store": False},
     #   )
     #   hotels = Agent(... tools=[convert_currency, toolbox], context_providers=[search],
-    #                  require_per_service_call_history_persistence=True,
     #                  default_options={"store": False})
     #   activities = Agent(... tools=[toolbox], context_providers=[search, skills],
-    #                      require_per_service_call_history_persistence=True,
     #                      default_options={"store": False})
 
-    # The handoff graph is wired for you and exposed as a single agent. It refers
-    # to flights/hotels/activities, so define those three specialists above first
-    # (and fill in _build_search_provider) before this runs.
+    # The group chat is wired for you and exposed as a single agent. It refers to
+    # flights/hotels/activities, so define those three specialists above first (and fill
+    # in _build_search_provider) before this runs.
     #
-    # termination_condition (pre-wired): each hosted turn must end IDLE, not
-    # IDLE_WITH_PENDING_REQUESTS. Without it HandoffBuilder parks after every
-    # Coordinator turn waiting for a function-result reply, and the next user
-    # question (delivered as plain text by the hosting layer) fails with
-    # "Unexpected content type while awaiting request info responses." We terminate
-    # once the Coordinator produces its own answer — which is why COORDINATOR_INSTRUCTIONS
-    # tells it to route silently (a narrated handoff would end the turn early).
+    # GroupChatBuilder wires the manager (orchestrator_agent) to each participant with
+    # bidirectional edges: every round the Coordinator picks the next specialist or
+    # terminates with the final answer, then the workflow completes (IDLE). Because it
+    # never parks on a request_info, a follow-up question in the same conversation is
+    # just the next run against the restored history — no "Unexpected content type"
+    # error. max_rounds is a whole-conversation safety cap against a manager that never
+    # terminates; normal turns end when the Coordinator decides the plan is complete.
     workflow = (
-        HandoffBuilder(
-            name="travelbuddy-runtime-handoff",
-            participants=[coordinator, flights, hotels, activities],
-            termination_condition=lambda conversation: bool(conversation)
-            and conversation[-1].role == "assistant"
-            and conversation[-1].author_name == "Coordinator",
+        GroupChatBuilder(
+            participants=[flights, hotels, activities],
+            orchestrator_agent=coordinator,
+            max_rounds=20,
         )
-        .with_start_agent(coordinator)
-        .add_handoff(coordinator, [flights, hotels, activities])
-        .add_handoff(flights, [coordinator])
-        .add_handoff(hotels, [coordinator])
-        .add_handoff(activities, [coordinator])
         .build()
     )
     return workflow.as_agent()
