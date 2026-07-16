@@ -14,7 +14,7 @@
 ## What's already in the repo
 
 - Everything from Steps 1–7 in `travel_assistant/` — the specialists, tools, toolbox, RAG, and skill.
-- `travel_assistant/coordinator.py` — the Step 7 handoff graph. In this step you extract the specialist constructors into reusable factories so the workflow builds the **same** agents.
+- `travel_assistant/coordinator.py` — the Step 7 group chat. In this step you extract the specialist constructors into reusable factories so the workflow builds the **same** agents.
 - `travel_toolbox/toolbox.yaml` — unchanged.
 
 This step adds a `workflow.py`, refactors `coordinator.py` to expose factories, repoints `main.py`, and adds a `Workflows` tag. There are **no** new environment variables and no new Azure resources.
@@ -23,7 +23,7 @@ This step adds a `workflow.py`, refactors `coordinator.py` to expose factories, 
 
 Step 7 was **runtime collaboration**: the Coordinator decided, turn by turn, which specialist should answer next. That's the right shape when the path is user-driven and unknown in advance.
 
-A **workflow** is the opposite trade-off. You choose it when the process has a **known shape**, must survive restarts, or needs an explicit review before a costly action. Trip planning fits perfectly: gather preferences → ask each specialist → consolidate a draft → (optionally) get approval → finalize. The graph makes that process repeatable and inspectable, at the cost of the conversational flexibility handoff gave you.
+A **workflow** is the opposite trade-off. You choose it when the process has a **known shape**, must survive restarts, or needs an explicit review before a costly action. Trip planning fits perfectly: gather preferences → ask each specialist → consolidate a draft → (optionally) get approval → finalize. The graph makes that process repeatable and inspectable, at the cost of the conversational flexibility the group chat gave you.
 
 **The graph model.** A workflow is built from **executors** (nodes) connected by **edges**. Executors can be `AgentExecutor` (an agent wrapped as a node) or your own `Executor` subclasses with `@handler` methods. The engine runs in **supersteps**: every executor ready at the start of a superstep runs, their messages are delivered, and the next superstep begins. Fanning three edges out of one node runs those branches **concurrently**; fanning several edges into one node lets it aggregate.
 
@@ -89,7 +89,7 @@ The point is a **single source of truth**: the runtime Coordinator and the workf
 
 ### 2. Create `travel_assistant/workflow.py`
 
-The workflow has three custom executors plus agent nodes. `GatherPreferences` fans the request out to all three specialists; `Consolidate` aggregates their answers, checkpoints the draft, then sends the finalize prompt; `finalize_itinerary` is an `AgentExecutor` that writes the plan and owns the final deliverable, using the `travel-guide` skill to render the shareable PDF and the `response-guardrails` skill to check the answer. This is the payoff over Step 7: there the handoff Coordinator was a pure router that couldn't carry a context provider, so the skills had to ride on the Activities leaf and only guarded that leaf's output. A dedicated `finalize` node owns the deliverable outright and guards the actual final answer.
+The workflow has three custom executors plus agent nodes. `GatherPreferences` fans the request out to all three specialists; `Consolidate` aggregates their answers, checkpoints the draft, then sends the finalize prompt; `finalize_itinerary` is an `AgentExecutor` that writes the plan and owns the final deliverable, using the `travel-guide` skill to render the shareable PDF and the `response-guardrails` skill to check the answer. This is the payoff over Step 7: there the group chat Coordinator was the manager and returned a structured routing decision, so it couldn't carry a context provider — the skills had to ride on the Activities leaf and only guarded that leaf's output. A dedicated `finalize` node owns the deliverable outright and guards the actual final answer.
 
 ```python
 # travel_assistant/workflow.py

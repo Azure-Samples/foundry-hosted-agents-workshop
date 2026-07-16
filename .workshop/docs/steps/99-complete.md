@@ -26,7 +26,7 @@ Then clean up the cloud resources you created.
 | Step 4 | Foundry Toolbox capabilities: CSV analysis with Code Interpreter, plus web search. |
 | Step 5 | Retrieval-augmented generation over a destinations index. |
 | Step 6 | A local travel-guide skill (colorful PDF trip guides) plus a required Foundry skill for shared, Responsible-AI response guardrails. |
-| Step 7 | A multi-agent runtime handoff between a Coordinator and specialist agents. |
+| Step 7 | A multi-agent runtime group chat between a Coordinator manager and specialist agents. |
 | Step 8 | A durable workflow with checkpoints and an approval gate. |
 | Step 9 | Long-term memory for traveler preferences across sessions. |
 
