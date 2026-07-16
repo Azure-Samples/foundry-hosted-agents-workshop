@@ -344,6 +344,127 @@ For the comparison prompt, the model may call `get_weather` once per city.
 - **Currency values look approximate**: they are static mock rates. Replace `MOCK_RATES_TO_USD` with a real exchange-rate API for production.
 - **Deploy didn't pick up my tools**: `azd ai agent init` **copied** your code into the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder, so edits in `travel_assistant/` don't deploy on their own. Re-run `azd ai agent init` (step 1 above) to refresh that snapshot — or copy `tools.py`/`main.py` into the folder's code directory — then `azd deploy` again.
 
+## Optional: Observe TravelBuddy's tool calls with Application Insights
+
+You just gave TravelBuddy three tools — wouldn't it be nice to *watch* each one fire: which tool the model chose, with what arguments, how long it took, and how many tokens the run cost? Foundry hosted agents have **built-in observability**. The Agent Framework is instrumented out of the box, and the Foundry hosting runtime exports those traces to **Application Insights** for you. There's **no code to write, no package to add, and no manifest change** — your `resources: []` stays exactly as it is. You connect an Application Insights resource, grant a couple of least-privilege read-only roles, and the traces appear.
+
+Each invocation becomes a span tree you can drill into:
+
+- `invoke_agent` — the top-level span for one request to TravelBuddy.
+- `chat` — each model call inside that request.
+- `execute_tool` — one span per tool the model runs, so `get_weather`, `get_local_time`, and `convert_currency` each show up **by name**, with their arguments and results.
+
+> This is entirely optional and needs a **deployed** agent — traces flow from the hosted runtime, not from `python main.py`. Skip it if you just want to finish the core step.
+>
+> You'll also need enough Azure rights to **create an Application Insights resource** and to **assign roles** (`Microsoft.Authorization/roleAssignments/write`) on it and its Log Analytics workspace — the baseline **Foundry User** role isn't enough. If you can't, ask an administrator to make the scoped assignments below (no subscription-level Owner required).
+
+### 1. Connect Application Insights to your project
+
+Foundry turns on **server-side tracing** the moment you connect an Application Insights resource — no code, and traces appear within minutes.
+
+1. Open your project in the [Microsoft Foundry portal](https://ai.azure.com/) (make sure **New Foundry** is on).
+2. In the left navigation select **Agents**, then the **Traces** tab at the top.
+3. Select **Connect**, then either pick an existing Application Insights resource or choose **Create new** and finish the wizard.
+
+> **Name it, then clean it up yourself.** If you create a new resource, prefix its name with your `WORKSHOP_RESOURCE_PREFIX` (for example `${WORKSHOP_RESOURCE_PREFIX}-appinsights`) so it's easy to spot later. Application Insights is created *out-of-band* — it isn't in the manifest, so **neither `azd down` nor `.workshop/scripts/cleanup.py` removes it**. Delete it (and any Log Analytics workspace the wizard created alongside it) when you're done, for example `az resource delete --ids <app-insights-resource-id>`.
+
+The connection lets the project **emit** telemetry using a connection string — not an identity — so *emitting* traces needs no role assignment. The grants below are only about *reading* the telemetry back.
+
+### 2. Grant yourself access to view the traces
+
+Your Foundry project access alone isn't enough: **Foundry User** sees metrics but **not** traces. Grant yourself the least-privilege **Monitoring Reader** role, scoped to the Application Insights resource. Its `*/read` permission reaches the underlying Log Analytics data, so you don't need a separate workspace grant.
+
+<!-- terminal -->
+```bash
+# Scope is the Application Insights resource you connected in step 1.
+SCOPE="/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Insights/components/<appinsights-name>"
+USER_ID="$(az ad signed-in-user show --query id -o tsv)"
+az role assignment create --assignee "$USER_ID" --role "Monitoring Reader" --scope "$SCOPE"
+```
+
+<!-- terminal -->
+```powershell
+# PowerShell — scope is the Application Insights resource you connected in step 1.
+$SCOPE = "/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Insights/components/<appinsights-name>"
+$USER_ID = az ad signed-in-user show --query id -o tsv
+az role assignment create --assignee $USER_ID --role "Monitoring Reader" --scope $SCOPE
+```
+
+Prefer the portal? On the Application Insights resource open **Access control (IAM)** → **Add role assignment** → **Monitoring Reader** → assign it to yourself. (Working straight from the Log Analytics workspace instead? **Log Analytics Reader** at the workspace scope also works.)
+
+### 3. Let the project read telemetry back (for evaluations)
+
+If you plan to use Foundry's **evaluations** feature — which reads your agent's telemetry back out of Application Insights — the **project's managed identity** needs read access to those traces. The trace data physically lives in the **Log Analytics workspace** behind Application Insights, so grant the **Log Analytics Reader** role at **both** scopes: the **Application Insights** resource *and* its **linked Log Analytics workspace**. That two-scope grant is what Microsoft's trace-evaluation guidance prescribes; a single-scope grant can leave evaluations unable to read the traces. Just *viewing* traces in step 4 doesn't need this grant — it's specifically for the project reading telemetry on your behalf.
+
+Assign **Log Analytics Reader** to the project's managed identity on **each** of these two resources (the project identity is selectable by name):
+
+- the **Application Insights** resource you connected in step 1, and
+- the **Log Analytics workspace** it's linked to (from Application Insights, open **Overview** and follow the **Workspace** link).
+
+For each resource: **Access control (IAM)** → **Add role assignment** → role **Log Analytics Reader** (**Job function roles** tab) → Members **Managed identity** → your **Foundry project** → **Review + assign**.
+
+> **Why the project and not the agent?** Your in-container tools reach downstream resources as the *agent's* instance identity, but reading telemetry for evaluations is a *project* operation. The hosted runtime **emits** traces through the project's Application Insights connection (step 1), while the project's **managed identity** is what Foundry uses to **read** them back for evaluations.
+
+Prefer the CLI? Copy the project's managed-identity **Object (principal) ID** from the project's **Identity** page in the portal, then assign the role at **both** scopes:
+
+<!-- terminal -->
+```bash
+PROJECT_MI_ID="<project-managed-identity-object-id>"   # from the project's Identity page
+APP_INSIGHTS="/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Insights/components/<appinsights-name>"
+WORKSPACE="/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<workspace-name>"
+
+# Grant Log Analytics Reader at BOTH scopes: the App Insights resource and its linked workspace.
+for SCOPE in "$APP_INSIGHTS" "$WORKSPACE"; do
+  az role assignment create \
+    --assignee-object-id "$PROJECT_MI_ID" \
+    --assignee-principal-type ServicePrincipal \
+    --role "Log Analytics Reader" \
+    --scope "$SCOPE"
+done
+```
+
+<!-- terminal -->
+```powershell
+# PowerShell
+$PROJECT_MI_ID = "<project-managed-identity-object-id>"   # from the project's Identity page
+$APP_INSIGHTS = "/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.Insights/components/<appinsights-name>"
+$WORKSPACE = "/subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.OperationalInsights/workspaces/<workspace-name>"
+
+# Grant Log Analytics Reader at BOTH scopes: the App Insights resource and its linked workspace.
+foreach ($SCOPE in @($APP_INSIGHTS, $WORKSPACE)) {
+  az role assignment create `
+    --assignee-object-id $PROJECT_MI_ID `
+    --assignee-principal-type ServicePrincipal `
+    --role "Log Analytics Reader" `
+    --scope $SCOPE
+}
+```
+
+> **Why `--assignee-object-id` and not `--assignee`?** The plain `--assignee` flag makes the CLI resolve the identity through Microsoft Graph, which often fails for a project managed identity (*"Cannot find user or service principal in graph database"*). Passing the object ID with `--assignee-principal-type ServicePrincipal` writes straight to Azure Resource Manager and skips that lookup.
+
+> **Evaluations still find no traces?** If your Log Analytics tables are set to a **Protected** access level, Log Analytics Reader can't read them — also assign **Privileged Monitoring Data Reader** to the project identity at the same two scopes.
+
+### 4. Generate traffic, then read the traces
+
+> **Heads up — traces capture prompt and tool content by default.** When deployed, the hosting runtime defaults `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `true`, so the spans you're about to generate include prompts, tool arguments, and model responses. That's great for debugging — and it's what content-based **evaluations** (step 3) read — but treat traces as **sensitive production data** and apply the same access controls you'd give logs. To record only structure (span names, durations, token counts, status) and redact content, set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `"false"` under `template.environment_variables` in `travel_assistant/agent.manifest.yaml` (and `agent.yaml`'s `environment_variables` for local runs), then **re-run `azd ai agent init` to refresh the deployed snapshot** (see the deploy section above) and `azd deploy`. Redacting content disables content-based quality evaluators, so keep it on only while you need evaluations. Either way, never put secrets in prompts or tool arguments.
+
+1. Make sure TravelBuddy is deployed (`azd deploy`, step 5 above). Already deployed before you connected Application Insights? No redeploy needed — tracing is enabled at the project level.
+2. Invoke it a few times to produce spans — reuse the [Try it](#try-it) prompts:
+
+   <!-- terminal -->
+   ```bash
+   azd ai agent invoke "Compare current weather in Lisbon, Reykjavik, and Tokyo."
+   ```
+
+3. In the Foundry portal open **Agents → Traces**, wait a minute, and refresh. Select a trace to step through the `invoke_agent` → `chat` → `execute_tool` spans and watch each tool call, its arguments, and its result. The same data also lands in the connected Application Insights resource, so you can query it in **Transaction search** or with KQL.
+
+**References:**
+
+- [Set up tracing in Microsoft Foundry](https://learn.microsoft.com/azure/foundry/observability/how-to/trace-agent-setup) — connect Application Insights and view traces (no code changes required).
+- [Troubleshoot evaluation and observability issues](https://learn.microsoft.com/azure/foundry/observability/how-to/troubleshooting#project-managed-identity-is-missing-trace-read-permissions) — the exact grant the project's managed identity needs to read traces for evaluations: **Log Analytics Reader on both the Application Insights resource and its linked Log Analytics workspace** (plus Privileged Monitoring Data Reader if the tables are protected).
+- [Hosted agent permissions — Agent observability](https://learn.microsoft.com/azure/foundry/agents/concepts/hosted-agent-permissions#agent-observability) — Microsoft's least-privilege roles for **viewing** telemetry (it lists a workspace-scoped Log Analytics Data Reader for the project identity).
+- [Observability in the Agent Framework](https://learn.microsoft.com/agent-framework/agents/observability) — the built-in GenAI instrumentation and the `invoke_agent` / `chat` / `execute_tool` spans.
+
 ## Solution
 
 > If you get stuck: [`.workshop/solutions/02-tools/`](.workshop/solutions/02-tools/)
