@@ -1,0 +1,108 @@
+name: Go back one workshop step
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type BACK to confirm. This moves you back one step and overwrites travel_assistant/ — your current work is backed up to .workshop_instance/workshop_backups/back-<timestamp>/ first."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared with init-workshop.yml, start-workshop.yml, reset-workshop.yml and
+  # advance-on-push.yml so every workflow that mutates the workshop state
+  # serializes on the same branch and never races another on `git push` or
+  # `.workshop_instance/.workshop-state.json`.
+  group: workshop-state-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  back:
+    if: ${{ github.event.inputs.confirm == 'BACK' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r .workshop/scripts/requirements.txt
+
+      - name: Go back one step
+        id: back
+        shell: bash
+        # advance_step.py --back exits non-zero for expected situations (already
+        # at step 0, a state/README desync, or missing canonical step files).
+        # Capture the outcome so the summary can explain it instead of failing
+        # the run with a bare red X. NEW_STEP is exported to $GITHUB_ENV by the
+        # script only on success.
+        run: |
+          set +e
+          output="$(python .workshop/scripts/advance_step.py --back 2>&1)"
+          code=$?
+          echo "$output"
+          # Use a random heredoc delimiter so the captured script output can
+          # never contain a line that prematurely terminates the $GITHUB_OUTPUT
+          # multiline value (delimiter-injection hardening).
+          delim="WORKSHOP_EOF_$(openssl rand -hex 16)"
+          {
+            echo "reason<<${delim}"
+            echo "$output"
+            echo "${delim}"
+          } >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Commit & push
+        if: steps.back.outputs.code == '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "workshop: go back to step ${NEW_STEP}"
+          git push
+
+      - name: Summarize move-back
+        if: steps.back.outputs.code == '0'
+        shell: bash
+        run: |
+          echo "## ✅ Moved back to step ${NEW_STEP}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Your work from the step you were on is preserved under .workshop_instance/workshop_backups/back-<timestamp>/." >> "$GITHUB_STEP_SUMMARY"
+          echo "Run \`git pull\` to refresh your README.md and the step's files." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize failure
+        if: steps.back.outputs.code != '0'
+        shell: bash
+        env:
+          # Pass the captured reason through the environment rather than
+          # interpolating ${{ }} straight into the script, so its contents can
+          # never be treated as shell to run.
+          REASON: ${{ steps.back.outputs.reason }}
+        run: |
+          echo "## ⚠️ Could not move back a step" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "The workshop state was left unchanged. Reason:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$REASON" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+  confirm-required:
+    if: ${{ github.event.inputs.confirm != 'BACK' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize missing confirmation
+        shell: bash
+        run: |
+          echo "## ⚠️ Move-back not confirmed. Re-run and type BACK in the confirm field." >> "$GITHUB_STEP_SUMMARY"
