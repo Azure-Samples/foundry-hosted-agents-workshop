@@ -123,7 +123,7 @@ def test_happy_path_advances_and_exports_new_step(workshop_repo, monkeypatch):
     assert result == 0
     assert json.loads((workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text())["current_step"] == 1
     assert "# Synthetic step 1" in (workshop_repo / "README.md").read_text(encoding="utf-8")
-    assert (workshop_repo / ".workshop_instance" / "workshop_backups" / "step-0" / "stub.txt").read_text(encoding="utf-8") == "old"
+    assert (workshop_repo / ".workshop_instance" / "workshop_backups" / "step-0" / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "old"
     assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "new step 1"
     assert github_env.read_text(encoding="utf-8") == "NEW_STEP=1\n"
 
@@ -201,7 +201,7 @@ def test_missing_step_files_warns_and_keeps_travel_assistant(workshop_repo, caps
     assert json.loads((workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text())["current_step"] == 5
     assert "# Synthetic step 5" in (workshop_repo / "README.md").read_text(encoding="utf-8")
     assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "keep me"
-    assert (workshop_repo / ".workshop_instance" / "workshop_backups" / "step-4" / "stub.txt").read_text(encoding="utf-8") == "keep me"
+    assert (workshop_repo / ".workshop_instance" / "workshop_backups" / "step-4" / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "keep me"
 
 
 def test_empty_travel_assistant_skips_backup(workshop_repo):
@@ -255,7 +255,7 @@ def test_advance_preserves_prior_step_files(workshop_repo):
     # Files carried forward from the prior step survive the advance (incremental).
     assert (workshop_repo / "travel_assistant" / "leftover.py").read_text(encoding="utf-8") == "# stale\n"
     # A backup is still taken before laying down the next step.
-    assert (workshop_repo / ".workshop_instance" / "workshop_backups" / "step-0" / "leftover.py").exists()
+    assert (workshop_repo / ".workshop_instance" / "workshop_backups" / "step-0" / "travel_assistant" / "leftover.py").exists()
 
 
 def test_reset_backs_up_and_returns_to_step_zero(workshop_repo):
@@ -272,7 +272,7 @@ def test_reset_backs_up_and_returns_to_step_zero(workshop_repo):
     assert "# Synthetic step 0" in (workshop_repo / "README.md").read_text(encoding="utf-8")
     backups = list((workshop_repo / ".workshop_instance" / "workshop_backups").glob("reset-*"))
     assert len(backups) == 1
-    assert (backups[0] / "stub.txt").read_text(encoding="utf-8") == "step 5 work"
+    assert (backups[0] / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "step 5 work"
     assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "reset starter"
     assert not (workshop_repo / "travel_assistant" / "old.txt").exists()
 
@@ -297,7 +297,7 @@ def test_reset_current_relays_current_step_and_backs_up(workshop_repo, monkeypat
     # Learner edits backed up, then replaced by the clean starter; stray file gone.
     backups = list((workshop_repo / ".workshop_instance" / "workshop_backups").glob("reset-current-05-*"))
     assert len(backups) == 1
-    assert (backups[0] / "stub.txt").read_text(encoding="utf-8") == "my edits"
+    assert (backups[0] / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "my edits"
     assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "step 5 starter"
     assert not (workshop_repo / "travel_assistant" / "scratch.txt").exists()
     assert github_env.read_text(encoding="utf-8") == "NEW_STEP=5\n"
@@ -809,7 +809,7 @@ def test_advance_backs_up_existing_root_overlay(workshop_repo):
 
     assert result == 0
     assert (
-        workshop_repo / ".workshop_instance" / "workshop_backups" / "step-1" / "travel_toolbox" / "toolbox.yaml"
+        workshop_repo / ".workshop_instance" / "workshop_backups" / "step-1" / "_root" / "travel_toolbox" / "toolbox.yaml"
     ).read_text(encoding="utf-8") == "v1"
 
 
@@ -828,7 +828,7 @@ def test_reset_removes_and_backs_up_root_overlay_target(workshop_repo):
     assert not (workshop_repo / "travel_toolbox").exists()
     backups = list((workshop_repo / ".workshop_instance" / "workshop_backups").glob("reset-*"))
     assert backups, "reset should create a timestamped backup"
-    assert (backups[0] / "travel_toolbox" / "toolbox.yaml").read_text(encoding="utf-8") == "live"
+    assert (backups[0] / "_root" / "travel_toolbox" / "toolbox.yaml").read_text(encoding="utf-8") == "live"
 
 
 def test_dry_run_reports_root_overlay_without_writing(workshop_repo, capsys):
@@ -1042,6 +1042,564 @@ def test_on_push_missing_state_after_init_fails_loudly(workshop_repo, monkeypatc
 
     assert result == 1
     assert "workshop state" in captured.err.lower()
+
+
+# === --back (local move-back-one-step) tests ===
+
+
+def _backups_dir(repo: Path) -> Path:
+    return repo / ".workshop_instance" / "workshop_backups"
+
+
+def _seed_step_backup(repo: Path, step: int, relpath: str, content: str) -> None:
+    """Seed the agent snapshot ``step-<step>/travel_assistant/<relpath>`` + manifest.
+
+    Mirrors what advance's atomic snapshot writes: the travel_assistant/ namespace
+    plus the completion manifest that marks the backup as restorable.
+    """
+
+    target = _backups_dir(repo) / f"step-{step}" / "travel_assistant" / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    _seed_backup_manifest(repo, step)
+
+
+def _seed_step_root_backup(repo: Path, step: int, relpath: str, content: str) -> None:
+    """Seed a repo-root overlay target ``step-<step>/_root/<relpath>`` + manifest."""
+
+    target = _backups_dir(repo) / f"step-{step}" / "_root" / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    _seed_backup_manifest(repo, step)
+
+
+def _seed_backup_manifest(repo: Path, step: int) -> None:
+    """Write the completion manifest that marks ``step-<step>/`` as restorable."""
+
+    manifest = _backups_dir(repo) / f"step-{step}" / "backup.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps({"format_version": 2, "step": step}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_back_restores_saved_work_from_backup(workshop_repo):
+    """Back prefers the step-<prev> snapshot so the learner's real work returns."""
+
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+    # The snapshot advance took before leaving step 1 (the learner's edited work).
+    _seed_step_backup(workshop_repo, 1, "stub.txt", "my edited step 1")
+    # Current step-2 workspace: a carried file plus a step-2-only file.
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 2 work", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "step2_only.py").write_text("# step 2\n", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+
+    assert result == 0
+    assert json.loads(
+        (workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text(encoding="utf-8")
+    )["current_step"] == 1
+    assert "# Synthetic step 1" in (workshop_repo / "README.md").read_text(encoding="utf-8")
+    # The learner's saved step-1 file is restored verbatim...
+    assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "my edited step 1"
+    # ...and the step-2-only file is gone (it wasn't part of step 1).
+    assert not (workshop_repo / "travel_assistant" / "step2_only.py").exists()
+    # Current work was snapshotted before the destructive restore.
+    back_backups = list(_backups_dir(workshop_repo).glob("back-*"))
+    assert len(back_backups) == 1
+    assert (back_backups[0] / "travel_assistant" / "step2_only.py").read_text(encoding="utf-8") == "# step 2\n"
+
+
+def test_back_at_step_zero_errors_without_writes(workshop_repo, capsys):
+    _write_state(workshop_repo, 0)
+    _write_readme(workshop_repo, 0)
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("setup", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "already at step 0" in captured.err
+    assert json.loads(
+        (workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text(encoding="utf-8")
+    )["current_step"] == 0
+    assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "setup"
+    assert not list(_backups_dir(workshop_repo).glob("back-*"))
+
+
+def test_back_from_final_step_returns_to_terminal(workshop_repo):
+    """99 -> 9 is the inverse of the cleanup jump and restores the step-9 snapshot."""
+
+    _write_state(workshop_repo, 99)
+    _write_readme(workshop_repo, 99)
+    _seed_step_backup(workshop_repo, 9, "stub.txt", "step 9 work")
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("cleanup", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+
+    assert result == 0
+    assert json.loads(
+        (workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text(encoding="utf-8")
+    )["current_step"] == 9
+    assert "# Synthetic step 9" in (workshop_repo / "README.md").read_text(encoding="utf-8")
+    assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "step 9 work"
+
+
+def test_back_dry_run_has_no_side_effects(workshop_repo, capsys):
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+    _seed_step_backup(workshop_repo, 1, "stub.txt", "my edited step 1")
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 2 work", encoding="utf-8")
+    original_state = (workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text(encoding="utf-8")
+    original_readme = (workshop_repo / "README.md").read_text(encoding="utf-8")
+
+    result = advance_step.main(["--back", "--dry-run"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "DRY RUN: going back step 2 -> 1" in captured.out
+    assert "would restore" in captured.out.lower()
+    assert (workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text(encoding="utf-8") == original_state
+    assert (workshop_repo / "README.md").read_text(encoding="utf-8") == original_readme
+    assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "step 2 work"
+    assert not list(_backups_dir(workshop_repo).glob("back-*"))
+
+
+def test_back_rebuilds_canonically_when_no_backup(workshop_repo, capsys):
+    """Without a step-<prev> snapshot, back rebuilds canonical files and warns."""
+
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+    # No workshop_backups/step-1/ exists. Provide canonical step files for 0..1.
+    (workshop_repo / ".workshop" / "step_files" / "00").mkdir(parents=True)
+    (workshop_repo / ".workshop" / "step_files" / "00" / "base0.txt").write_text("b0", encoding="utf-8")
+    (workshop_repo / ".workshop" / "step_files" / "01").mkdir(parents=True)
+    (workshop_repo / ".workshop" / "step_files" / "01" / "base1.txt").write_text("b1", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "step2_only.py").write_text("# step 2\n", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "no saved" in captured.err.lower()
+    assert json.loads(
+        (workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text(encoding="utf-8")
+    )["current_step"] == 1
+    # Canonical step 0 and step 1 files are laid down...
+    assert (workshop_repo / "travel_assistant" / "base0.txt").read_text(encoding="utf-8") == "b0"
+    assert (workshop_repo / "travel_assistant" / "base1.txt").read_text(encoding="utf-8") == "b1"
+    # ...and the step-2-only file is gone.
+    assert not (workshop_repo / "travel_assistant" / "step2_only.py").exists()
+    # Current work is still snapshotted before the rebuild.
+    back_backups = list(_backups_dir(workshop_repo).glob("back-*"))
+    assert len(back_backups) == 1
+    assert (back_backups[0] / "travel_assistant" / "step2_only.py").exists()
+
+
+def test_back_rebuild_missing_step_files_errors_before_clearing(workshop_repo, capsys):
+    """A canonical rebuild with a missing step dir must abort before any clear."""
+
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+    # step_files/00 exists but step_files/01 is intentionally missing, and there
+    # is no workshop_backups/step-1/ to restore from.
+    (workshop_repo / ".workshop" / "step_files" / "00").mkdir(parents=True)
+    (workshop_repo / ".workshop" / "step_files" / "00" / "base0.txt").write_text("b0", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "work.py").write_text("keep me", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert ".workshop/step_files/01/" in captured.err
+    # Nothing destructive happened: state, workspace, and backups are untouched.
+    assert json.loads(
+        (workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text(encoding="utf-8")
+    )["current_step"] == 2
+    assert (workshop_repo / "travel_assistant" / "work.py").read_text(encoding="utf-8") == "keep me"
+    assert not list(_backups_dir(workshop_repo).glob("back-*"))
+
+
+def test_back_state_desync_exits_nonzero(workshop_repo, capsys):
+    """State/README disagreement aborts back before any destructive work."""
+
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 3)
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("work", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "State desync" in captured.err
+    assert not list(_backups_dir(workshop_repo).glob("back-*"))
+
+
+def test_back_restores_root_overlay_target_to_repo_root(workshop_repo):
+    """Restore routes known root-overlay names to the repo root, not travel_assistant/."""
+
+    _write_state(workshop_repo, 5)
+    _write_readme(workshop_repo, 5)
+    # Declare travel_toolbox as a root overlay target (discovered from any step).
+    _create_root_overlay(workshop_repo, 4, "travel_toolbox/toolbox.yaml", "declared")
+    # The step-4 snapshot holds both travel_assistant/ content and the root target.
+    _seed_step_backup(workshop_repo, 4, "stub.txt", "step 4 work")
+    _seed_step_root_backup(workshop_repo, 4, "travel_toolbox/toolbox.yaml", "backed up")
+    # Current step-5 state on disk.
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 5 work", encoding="utf-8")
+    (workshop_repo / "travel_toolbox").mkdir()
+    (workshop_repo / "travel_toolbox" / "toolbox.yaml").write_text("live step 5", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+
+    assert result == 0
+    assert json.loads(
+        (workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text(encoding="utf-8")
+    )["current_step"] == 4
+    # The root target is restored at the repo root...
+    assert (workshop_repo / "travel_toolbox" / "toolbox.yaml").read_text(encoding="utf-8") == "backed up"
+    # ...and NOT copied inside travel_assistant/.
+    assert not (workshop_repo / "travel_assistant" / "travel_toolbox").exists()
+    assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "step 4 work"
+    # The live step-5 root target was snapshotted first.
+    back_backups = list(_backups_dir(workshop_repo).glob("back-*"))
+    assert (back_backups[0] / "_root" / "travel_toolbox" / "toolbox.yaml").read_text(encoding="utf-8") == "live step 5"
+
+
+@_requires_git
+def test_back_auto_commit_creates_go_back_commit(workshop_repo):
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+    _seed_step_backup(workshop_repo, 1, "stub.txt", "my edited step 1")
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 2 work", encoding="utf-8")
+    _git_init_with_identity(workshop_repo)
+
+    result = advance_step.main(["--back", "--auto-commit"])
+
+    assert result == 0
+    log = _git(workshop_repo, "log", "-1", "--format=%s").stdout.strip()
+    assert log == "workshop: go back to step 1"
+
+
+def test_back_and_reset_are_mutually_exclusive(workshop_repo, capsys):
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+
+    with pytest.raises(SystemExit):
+        advance_step.main(["--back", "--reset"])
+    captured = capsys.readouterr()
+    assert "not allowed with argument" in captured.err or "argument" in captured.err
+
+
+def test_back_backups_do_not_merge_within_same_second(workshop_repo, monkeypatch):
+    """Two backs in the same UTC second must land in distinct backup dirs.
+
+    ``_reserve_backup_dir`` uses an exclusive mkdir and a ``-N`` suffix so a
+    rapid back-then-back never merges the two snapshots into one directory,
+    keeping the "current work is always backed up first" guarantee true.
+    """
+
+    class _FrozenDatetime(advance_step.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 9, 12, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(advance_step, "datetime", _FrozenDatetime)
+
+    # 3 -> 2 (backs up "step 3 work"), then 2 -> 1 (backs up restored "step 2 saved").
+    _write_state(workshop_repo, 3)
+    _write_readme(workshop_repo, 3)
+    _seed_step_backup(workshop_repo, 2, "stub.txt", "step 2 saved")
+    _seed_step_backup(workshop_repo, 1, "stub.txt", "step 1 saved")
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 3 work", encoding="utf-8")
+
+    assert advance_step.main(["--back"]) == 0
+    assert advance_step.main(["--back"]) == 0
+
+    back_dirs = sorted(p.name for p in _backups_dir(workshop_repo).glob("back-*"))
+    assert len(back_dirs) == 2, f"expected two distinct back dirs, got {back_dirs}"
+    contents = {
+        (p / "travel_assistant" / "stub.txt").read_text(encoding="utf-8")
+        for p in _backups_dir(workshop_repo).glob("back-*")
+    }
+    assert contents == {"step 3 work", "step 2 saved"}
+
+
+def test_back_does_not_misroute_agent_file_named_after_root_target(workshop_repo):
+    """#1: a travel_assistant/ entry sharing a root-target name round-trips back
+    into travel_assistant/, never the repo root.
+
+    The namespaced backup layout keeps the agent snapshot under
+    ``travel_assistant/`` and root targets under ``_root/``, so restore is
+    structural and cannot misroute a learner dir that happens to be named after
+    a root overlay target.
+    """
+
+    _write_state(workshop_repo, 1)
+    _write_readme(workshop_repo, 1)
+    # travel_toolbox is a declared root overlay target...
+    _create_root_overlay(workshop_repo, 2, "travel_toolbox/toolbox.yaml", "declared")
+    _create_step_files(workshop_repo, 2, "step 2 file")
+    # ...but the learner also has a DIRECTORY named travel_toolbox INSIDE
+    # travel_assistant/ (the collision case).
+    inner = workshop_repo / "travel_assistant" / "travel_toolbox"
+    inner.mkdir()
+    (inner / "notes.md").write_text("my agent notes", encoding="utf-8")
+
+    assert advance_step.main(["--expected", "1"]) == 0  # snapshots step-1
+    assert advance_step.main(["--back"]) == 0           # restores step-1
+
+    # The learner's file returns INSIDE travel_assistant/, not at the repo root.
+    assert (workshop_repo / "travel_assistant" / "travel_toolbox" / "notes.md").read_text(
+        encoding="utf-8"
+    ) == "my agent notes"
+    assert not (workshop_repo / "travel_toolbox" / "notes.md").exists()
+
+
+def test_back_after_revisit_does_not_resurrect_deleted_file(workshop_repo):
+    """#3: re-advancing a revisited step REPLACES its backup, so a file deleted
+    on the revisit is not resurrected by a later back."""
+
+    _write_state(workshop_repo, 1)
+    _write_readme(workshop_repo, 1)
+    (workshop_repo / "travel_assistant" / "keep.txt").write_text("keep", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "doomed.txt").write_text("delete me later", encoding="utf-8")
+    _create_step_files(workshop_repo, 2, "step 2 file")
+
+    assert advance_step.main(["--expected", "1"]) == 0  # 1 -> 2, snapshots step-1
+    assert advance_step.main(["--back"]) == 0           # 2 -> 1, restores both files
+    assert (workshop_repo / "travel_assistant" / "doomed.txt").exists()
+
+    # On the revisit the learner deletes doomed.txt, then re-advances.
+    (workshop_repo / "travel_assistant" / "doomed.txt").unlink()
+    assert advance_step.main(["--expected", "1"]) == 0  # 1 -> 2, REPLACES step-1
+
+    assert advance_step.main(["--back"]) == 0           # 2 -> 1 again
+    assert (workshop_repo / "travel_assistant" / "keep.txt").read_text(encoding="utf-8") == "keep"
+    assert not (workshop_repo / "travel_assistant" / "doomed.txt").exists()
+
+
+def test_advance_drops_stale_backup_when_workspace_emptied(workshop_repo):
+    """#3 (empty case): emptying a revisited workspace before re-advancing drops
+    the stale snapshot so a later back never restores removed files."""
+
+    _write_state(workshop_repo, 1)
+    _write_readme(workshop_repo, 1)
+    _seed_step_backup(workshop_repo, 1, "old.txt", "stale")
+    # The learner emptied travel_assistant/ down to the placeholder.
+    (workshop_repo / "travel_assistant" / ".gitkeep").write_text("", encoding="utf-8")
+    _create_step_files(workshop_repo, 2, "step 2 file")
+
+    assert advance_step.main(["--expected", "1"]) == 0
+
+    # Nothing worth backing up -> the stale step-1 snapshot is gone.
+    assert not (workshop_repo / ".workshop_instance" / "workshop_backups" / "step-1").exists()
+
+
+def test_back_treats_legacy_flattened_backup_as_unrestorable(workshop_repo, capsys):
+    """A legacy step-<prev> backup without a manifest is not restored; back falls
+    back to a canonical rebuild and says the backup is legacy."""
+
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+    # Legacy flattened backup: files directly under step-1/, no manifest, no namespaces.
+    legacy = _backups_dir(workshop_repo) / "step-1"
+    legacy.mkdir(parents=True)
+    (legacy / "stub.txt").write_text("legacy work", encoding="utf-8")
+    # Canonical step files for the rebuild fallback.
+    (workshop_repo / ".workshop" / "step_files" / "00").mkdir(parents=True)
+    (workshop_repo / ".workshop" / "step_files" / "00" / "base0.txt").write_text("b0", encoding="utf-8")
+    (workshop_repo / ".workshop" / "step_files" / "01").mkdir(parents=True)
+    (workshop_repo / ".workshop" / "step_files" / "01" / "base1.txt").write_text("b1", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "step2_only.py").write_text("# step 2\n", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "legacy" in captured.err.lower()
+    # Canonical rebuild happened; the legacy content was NOT restored.
+    assert (workshop_repo / "travel_assistant" / "base1.txt").read_text(encoding="utf-8") == "b1"
+    assert not (workshop_repo / "travel_assistant" / "stub.txt").exists()
+
+
+def test_back_restores_root_target_that_is_a_file(workshop_repo):
+    """A root overlay target that is a FILE (not a dir) restores from _root/."""
+
+    _write_state(workshop_repo, 5)
+    _write_readme(workshop_repo, 5)
+    _create_root_overlay(workshop_repo, 4, "toolbox.yaml", "declared")  # a file target
+    _seed_step_backup(workshop_repo, 4, "stub.txt", "step 4 work")
+    _seed_step_root_backup(workshop_repo, 4, "toolbox.yaml", "backed up file")
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 5 work", encoding="utf-8")
+    (workshop_repo / "toolbox.yaml").write_text("live", encoding="utf-8")
+
+    assert advance_step.main(["--back"]) == 0
+
+    assert (workshop_repo / "toolbox.yaml").read_text(encoding="utf-8") == "backed up file"
+    assert not (workshop_repo / "travel_assistant" / "toolbox.yaml").exists()
+
+
+def test_snapshot_publish_failure_preserves_previous_backup(workshop_repo, monkeypatch):
+    """#1: if the atomic publish swap fails, the prior step backup is rolled back
+    and no staging/superseded orphans are left behind.
+
+    ``_snapshot_current_step`` renames the old snapshot aside, swaps the new one
+    into place, and only then deletes the old copy. A failure during the swap must
+    restore the old snapshot so ``--back`` always has a valid backup to restore.
+    """
+
+    _write_state(workshop_repo, 1)
+    _write_readme(workshop_repo, 1)
+    _seed_step_backup(workshop_repo, 1, "stub.txt", "old backup")
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("current work", encoding="utf-8")
+    _create_step_files(workshop_repo, 2, "step 2 file")
+
+    real_replace = advance_step.os.replace
+
+    def failing_replace(src, dst, *args, **kwargs):
+        # Fail only on the publish swap (staging -> final); the rename-aside and
+        # rollback operate on step-1 / step-1.superseded, which do not match.
+        if ".staging-" in str(src):
+            raise OSError("simulated publish failure")
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(advance_step.os, "replace", failing_replace)
+
+    assert advance_step.main(["--expected", "1"]) != 0
+
+    backups = _backups_dir(workshop_repo)
+    # The previous backup is intact (rolled back), not lost or half-written.
+    assert (backups / "step-1" / "travel_assistant" / "stub.txt").read_text(
+        encoding="utf-8"
+    ) == "old backup"
+    # No staging or superseded directories leaked.
+    assert not list(backups.glob("*.staging*"))
+    assert not list(backups.glob("*.superseded*"))
+
+
+def test_snapshot_always_captures_agent_namespace_for_root_only_work(workshop_repo):
+    """#2: a root-only snapshot still records travel_assistant/ (even a lone
+    .gitkeep) so a later --back restores the placeholder instead of an empty dir.
+    """
+
+    _write_state(workshop_repo, 1)
+    _write_readme(workshop_repo, 1)
+    # Agent workspace is just the placeholder; the real work this step is root-level.
+    (workshop_repo / "travel_assistant" / ".gitkeep").write_text("", encoding="utf-8")
+    _create_root_overlay(workshop_repo, 1, "travel_toolbox/tb.yaml", "declared")
+    (workshop_repo / "travel_toolbox").mkdir()
+    (workshop_repo / "travel_toolbox" / "tb.yaml").write_text("root work", encoding="utf-8")
+    _create_step_files(workshop_repo, 2, "step 2 file")
+
+    assert advance_step.main(["--expected", "1"]) == 0
+
+    # The agent namespace is captured despite holding only the placeholder.
+    assert (
+        _backups_dir(workshop_repo) / "step-1" / "travel_assistant" / ".gitkeep"
+    ).is_file()
+
+    assert advance_step.main(["--back"]) == 0
+    # Restore reproduces travel_assistant/ exactly: placeholder back, step-2 file gone.
+    assert (workshop_repo / "travel_assistant" / ".gitkeep").is_file()
+    assert not (workshop_repo / "travel_assistant" / "stub.txt").exists()
+
+
+@pytest.mark.parametrize("relpath", [".github/workflows/ci.yml", "Makefile", ".GITHUB/ci.yml"])
+def test_root_overlay_rejects_machinery_target_name(workshop_repo, relpath):
+    """#3: a _root overlay that targets workshop machinery (or a case variant of
+    it) is rejected before any backup/clear/restore can corrupt the repo."""
+
+    _create_root_overlay(workshop_repo, 2, relpath, "x")
+
+    with pytest.raises(advance_step.AdvanceError, match="protected repo path"):
+        advance_step._root_overlay_targets()
+
+
+def test_back_replaces_stale_undeclared_root_target(workshop_repo):
+    """#4: restore is an exact replacement even for a backup target the current
+    step files no longer declare (so the caller's clear pass never touched it)."""
+
+    _write_state(workshop_repo, 5)
+    _write_readme(workshop_repo, 5)
+    # travel_toolbox is captured in the step-4 backup but NOT declared by any
+    # current step_files/_root, so _clear_root_targets leaves the live copy alone.
+    _seed_step_backup(workshop_repo, 4, "stub.txt", "step 4 work")
+    _seed_step_root_backup(workshop_repo, 4, "travel_toolbox/keep.txt", "kept")
+    live = workshop_repo / "travel_toolbox"
+    live.mkdir()
+    (live / "keep.txt").write_text("stale", encoding="utf-8")
+    (live / "extra.txt").write_text("should be gone after restore", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 5 work", encoding="utf-8")
+
+    assert advance_step.main(["--back"]) == 0
+
+    assert (live / "keep.txt").read_text(encoding="utf-8") == "kept"
+    # The stale, undeclared extra file is replaced away, not merged over.
+    assert not (live / "extra.txt").exists()
+
+
+def test_back_treats_malformed_manifest_as_unrestorable(workshop_repo, capsys):
+    """#5: a manifest whose step is not an integer is rejected as malformed, so
+    --back falls back to a canonical rebuild rather than trusting it."""
+
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+    backup = _backups_dir(workshop_repo) / "step-1"
+    (backup / "travel_assistant").mkdir(parents=True)
+    (backup / "travel_assistant" / "forged.txt").write_text("do not restore", encoding="utf-8")
+    (backup / "backup.json").write_text(
+        json.dumps({"format_version": 2, "step": "oops"}) + "\n", encoding="utf-8"
+    )
+    # Canonical step files for the rebuild fallback.
+    (workshop_repo / ".workshop" / "step_files" / "00").mkdir(parents=True)
+    (workshop_repo / ".workshop" / "step_files" / "00" / "base0.txt").write_text("b0", encoding="utf-8")
+    (workshop_repo / ".workshop" / "step_files" / "01").mkdir(parents=True)
+    (workshop_repo / ".workshop" / "step_files" / "01" / "base1.txt").write_text("b1", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "step2_only.py").write_text("# step 2\n", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "legacy" in captured.err.lower()
+    # Canonical rebuild happened; the forged backup content was NOT restored.
+    assert (workshop_repo / "travel_assistant" / "base1.txt").read_text(encoding="utf-8") == "b1"
+    assert not (workshop_repo / "travel_assistant" / "forged.txt").exists()
+
+
+def test_root_overlay_rejects_protected_target_name(workshop_repo):
+    """A _root overlay that targets a protected repo path is rejected up front."""
+
+    _create_root_overlay(workshop_repo, 2, "travel_assistant/oops.txt", "x")
+
+    with pytest.raises(advance_step.AdvanceError, match="protected repo path"):
+        advance_step._root_overlay_targets()
+
+
+def test_reset_backups_are_unique_within_same_second(workshop_repo, monkeypatch):
+    """Two resets in the same UTC second land in distinct backup dirs."""
+
+    class _FrozenDatetime(advance_step.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 9, 12, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(advance_step, "datetime", _FrozenDatetime)
+
+    _create_step_files(workshop_repo, 0, "starter")
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("work a", encoding="utf-8")
+
+    assert advance_step.main(["--reset"]) == 0
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("work b", encoding="utf-8")
+    assert advance_step.main(["--reset"]) == 0
+
+    reset_dirs = sorted(p.name for p in _backups_dir(workshop_repo).glob("reset-*"))
+    assert len(reset_dirs) == 2, f"expected two distinct reset dirs, got {reset_dirs}"
 
 
 # --- machinery-only push classification (advance-on-push guard #4) -----------

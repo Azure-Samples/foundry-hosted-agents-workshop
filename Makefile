@@ -9,11 +9,12 @@
 
 PYTHON ?= python
 
-.PHONY: help advance reset reset-current preflight sync-template
+.PHONY: help advance back reset reset-current preflight sync-template
 
 help:
 	@echo "Workshop targets (fully-local flow):"
 	@echo "  make advance        Advance to the next workshop step and auto-commit"
+	@echo "  make back           Move back one workshop step and auto-commit"
 	@echo "  make reset          Reset the workshop to step 0 and auto-commit"
 	@echo "  make reset-current  Re-lay the CURRENT step's clean starter files and"
 	@echo "                      re-render its README, then auto-commit (backs up"
@@ -26,6 +27,7 @@ help:
 	@echo ""
 	@echo "If 'make' is unavailable, run the scripts directly, e.g.:"
 	@echo "  $(PYTHON) .workshop/scripts/advance_step.py --expected-current-step 0 --auto-commit"
+	@echo "  $(PYTHON) .workshop/scripts/advance_step.py --back --auto-commit"
 	@echo "  $(PYTHON) .workshop/scripts/advance_step.py --reset --auto-commit"
 	@echo "  $(PYTHON) .workshop/scripts/advance_step.py --reset-current --auto-commit"
 	@echo "  $(PYTHON) .workshop/scripts/preflight.py"
@@ -33,6 +35,9 @@ help:
 
 advance:
 	$(PYTHON) .workshop/scripts/advance_step.py --auto-commit
+
+back:
+	$(PYTHON) .workshop/scripts/advance_step.py --back --auto-commit
 
 reset:
 	$(PYTHON) .workshop/scripts/advance_step.py --reset --auto-commit

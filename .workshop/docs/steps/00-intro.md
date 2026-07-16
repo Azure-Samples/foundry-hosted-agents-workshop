@@ -273,6 +273,14 @@ python .workshop/scripts/advance_step.py --reset --auto-commit
 
 Your previous `travel_assistant/` is preserved under `.workshop_instance/workshop_backups/reset-<timestamp>/`.
 
+**Move back one step:**
+
+```bash
+python .workshop/scripts/advance_step.py --back --auto-commit
+```
+
+Advancing has no built-in undo when you work locally without committing each step, so this is how you step back. It restores your saved work from `.workshop_instance/workshop_backups/step-<N>/` (the snapshot advance takes before leaving a step); if that snapshot is missing it rebuilds the canonical step files instead and warns you. Your current work is always backed up to `.workshop_instance/workshop_backups/back-<timestamp>/` first, and it errors at step 0.
+
 **Pull the latest workshop machinery (without advancing):**
 
 ```bash
@@ -303,6 +311,7 @@ uv run python .workshop/scripts/preflight.py
 
 ```bash
 make advance        # advance to the next step (auto-commits workshop paths)
+make back           # move back one step (auto-commits workshop paths)
 make reset          # reset to step 0 (auto-commits workshop paths)
 make reset-current  # re-lay the current step's clean files (auto-commits)
 make preflight      # run environment checks
