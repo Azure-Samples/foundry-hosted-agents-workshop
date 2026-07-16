@@ -1442,6 +1442,134 @@ def test_back_restores_root_target_that_is_a_file(workshop_repo):
     assert not (workshop_repo / "travel_assistant" / "toolbox.yaml").exists()
 
 
+def test_snapshot_publish_failure_preserves_previous_backup(workshop_repo, monkeypatch):
+    """#1: if the atomic publish swap fails, the prior step backup is rolled back
+    and no staging/superseded orphans are left behind.
+
+    ``_snapshot_current_step`` renames the old snapshot aside, swaps the new one
+    into place, and only then deletes the old copy. A failure during the swap must
+    restore the old snapshot so ``--back`` always has a valid backup to restore.
+    """
+
+    _write_state(workshop_repo, 1)
+    _write_readme(workshop_repo, 1)
+    _seed_step_backup(workshop_repo, 1, "stub.txt", "old backup")
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("current work", encoding="utf-8")
+    _create_step_files(workshop_repo, 2, "step 2 file")
+
+    real_replace = advance_step.os.replace
+
+    def failing_replace(src, dst, *args, **kwargs):
+        # Fail only on the publish swap (staging -> final); the rename-aside and
+        # rollback operate on step-1 / step-1.superseded, which do not match.
+        if ".staging-" in str(src):
+            raise OSError("simulated publish failure")
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(advance_step.os, "replace", failing_replace)
+
+    assert advance_step.main(["--expected", "1"]) != 0
+
+    backups = _backups_dir(workshop_repo)
+    # The previous backup is intact (rolled back), not lost or half-written.
+    assert (backups / "step-1" / "travel_assistant" / "stub.txt").read_text(
+        encoding="utf-8"
+    ) == "old backup"
+    # No staging or superseded directories leaked.
+    assert not list(backups.glob("*.staging*"))
+    assert not list(backups.glob("*.superseded*"))
+
+
+def test_snapshot_always_captures_agent_namespace_for_root_only_work(workshop_repo):
+    """#2: a root-only snapshot still records travel_assistant/ (even a lone
+    .gitkeep) so a later --back restores the placeholder instead of an empty dir.
+    """
+
+    _write_state(workshop_repo, 1)
+    _write_readme(workshop_repo, 1)
+    # Agent workspace is just the placeholder; the real work this step is root-level.
+    (workshop_repo / "travel_assistant" / ".gitkeep").write_text("", encoding="utf-8")
+    _create_root_overlay(workshop_repo, 1, "travel_toolbox/tb.yaml", "declared")
+    (workshop_repo / "travel_toolbox").mkdir()
+    (workshop_repo / "travel_toolbox" / "tb.yaml").write_text("root work", encoding="utf-8")
+    _create_step_files(workshop_repo, 2, "step 2 file")
+
+    assert advance_step.main(["--expected", "1"]) == 0
+
+    # The agent namespace is captured despite holding only the placeholder.
+    assert (
+        _backups_dir(workshop_repo) / "step-1" / "travel_assistant" / ".gitkeep"
+    ).is_file()
+
+    assert advance_step.main(["--back"]) == 0
+    # Restore reproduces travel_assistant/ exactly: placeholder back, step-2 file gone.
+    assert (workshop_repo / "travel_assistant" / ".gitkeep").is_file()
+    assert not (workshop_repo / "travel_assistant" / "stub.txt").exists()
+
+
+@pytest.mark.parametrize("relpath", [".github/workflows/ci.yml", "Makefile", ".GITHUB/ci.yml"])
+def test_root_overlay_rejects_machinery_target_name(workshop_repo, relpath):
+    """#3: a _root overlay that targets workshop machinery (or a case variant of
+    it) is rejected before any backup/clear/restore can corrupt the repo."""
+
+    _create_root_overlay(workshop_repo, 2, relpath, "x")
+
+    with pytest.raises(advance_step.AdvanceError, match="protected repo path"):
+        advance_step._root_overlay_targets()
+
+
+def test_back_replaces_stale_undeclared_root_target(workshop_repo):
+    """#4: restore is an exact replacement even for a backup target the current
+    step files no longer declare (so the caller's clear pass never touched it)."""
+
+    _write_state(workshop_repo, 5)
+    _write_readme(workshop_repo, 5)
+    # travel_toolbox is captured in the step-4 backup but NOT declared by any
+    # current step_files/_root, so _clear_root_targets leaves the live copy alone.
+    _seed_step_backup(workshop_repo, 4, "stub.txt", "step 4 work")
+    _seed_step_root_backup(workshop_repo, 4, "travel_toolbox/keep.txt", "kept")
+    live = workshop_repo / "travel_toolbox"
+    live.mkdir()
+    (live / "keep.txt").write_text("stale", encoding="utf-8")
+    (live / "extra.txt").write_text("should be gone after restore", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 5 work", encoding="utf-8")
+
+    assert advance_step.main(["--back"]) == 0
+
+    assert (live / "keep.txt").read_text(encoding="utf-8") == "kept"
+    # The stale, undeclared extra file is replaced away, not merged over.
+    assert not (live / "extra.txt").exists()
+
+
+def test_back_treats_malformed_manifest_as_unrestorable(workshop_repo, capsys):
+    """#5: a manifest whose step is not an integer is rejected as malformed, so
+    --back falls back to a canonical rebuild rather than trusting it."""
+
+    _write_state(workshop_repo, 2)
+    _write_readme(workshop_repo, 2)
+    backup = _backups_dir(workshop_repo) / "step-1"
+    (backup / "travel_assistant").mkdir(parents=True)
+    (backup / "travel_assistant" / "forged.txt").write_text("do not restore", encoding="utf-8")
+    (backup / "backup.json").write_text(
+        json.dumps({"format_version": 2, "step": "oops"}) + "\n", encoding="utf-8"
+    )
+    # Canonical step files for the rebuild fallback.
+    (workshop_repo / ".workshop" / "step_files" / "00").mkdir(parents=True)
+    (workshop_repo / ".workshop" / "step_files" / "00" / "base0.txt").write_text("b0", encoding="utf-8")
+    (workshop_repo / ".workshop" / "step_files" / "01").mkdir(parents=True)
+    (workshop_repo / ".workshop" / "step_files" / "01" / "base1.txt").write_text("b1", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "step2_only.py").write_text("# step 2\n", encoding="utf-8")
+
+    result = advance_step.main(["--back"])
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "legacy" in captured.err.lower()
+    # Canonical rebuild happened; the forged backup content was NOT restored.
+    assert (workshop_repo / "travel_assistant" / "base1.txt").read_text(encoding="utf-8") == "b1"
+    assert not (workshop_repo / "travel_assistant" / "forged.txt").exists()
+
+
 def test_root_overlay_rejects_protected_target_name(workshop_repo):
     """A _root overlay that targets a protected repo path is rejected up front."""
 

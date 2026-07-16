@@ -55,11 +55,9 @@ BACKUP_ROOT_SUBDIR = ROOT_OVERLAY_DIR
 BACKUP_MANIFEST = "backup.json"
 BACKUP_FORMAT_VERSION = 2
 # Repo-root paths a _root overlay target must never shadow — backing up, clearing,
-# or restoring such a name would corrupt the repository or the backup store
-# itself (e.g. a target named ".workshop_instance" would delete the backups).
-_PROTECTED_ROOT_TARGETS = frozenset(
-    {TRAVEL_ASSISTANT_DIR, README_FILE, ".workshop", ".workshop_instance", ".git"}
-)
+# or restoring such a name would corrupt the repository or the backup store itself
+# (e.g. a target named ".workshop_instance" would delete the backups). Defined just
+# below MACHINERY_PATHS, which it reuses as the single source of truth.
 SCHEMA_VERSION = 1
 # Commit-message sentinel that advance-on-push.yml looks for to suppress an
 # auto-advance. reset-current re-lays the CURRENT step (it must not move to the
@@ -94,6 +92,15 @@ MACHINERY_PATHS = (
     "SECURITY.md",
     "SUPPORT.md",
     "LICENSE",
+)
+# Repo-root names a _root overlay target must never shadow. A target that resolves
+# to workshop machinery/platform scaffolding (MACHINERY_PATHS) or to the Git
+# metadata directory would let reset/back back up, clear, or restore over the
+# repository's own infrastructure — so those names are rejected up front. Stored
+# casefolded and compared casefolded so a case variant (e.g. ".GIT" on a
+# case-insensitive filesystem) cannot slip past the guard.
+_PROTECTED_ROOT_TARGETS = frozenset(
+    name.casefold() for name in (*MACHINERY_PATHS, TRAVEL_ASSISTANT_DIR, ".git")
 )
 # Paths that --auto-commit is allowed to stage. Limited to workshop-owned
 # locations so unrelated local edits, untracked files, or secrets are never
@@ -294,6 +301,34 @@ def _copy_tree(source: Path, destination: Path, *, ignore=None) -> None:
         raise AdvanceError(f"Failed to copy {source} to {destination}: {exc}") from exc
 
 
+def _replace_path_with(source: Path | None, destination: Path) -> None:
+    """Clear ``destination`` then copy ``source`` onto it (exact replacement).
+
+    Removes whatever is at ``destination`` first — a directory, a file, or a
+    symlink — so the copy never merges into leftover contents. When ``source`` is
+    ``None`` the destination is only cleared. Used by restore so a snapshot is
+    reproduced exactly even over a stale target the caller did not clear.
+    """
+
+    try:
+        if destination.is_dir() and not destination.is_symlink():
+            shutil.rmtree(destination)
+        elif destination.exists() or destination.is_symlink():
+            destination.unlink()
+    except OSError as exc:
+        raise AdvanceError(f"Failed to clear {destination}: {exc}") from exc
+    if source is None:
+        return
+    if source.is_dir():
+        _copy_tree(source, destination)
+    else:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(source, destination)
+        except OSError as exc:
+            raise AdvanceError(f"Failed to copy {source} to {destination}: {exc}") from exc
+
+
 def _root_overlay_targets() -> set[str]:
     """Return the top-level repo-root paths the workshop owns via ``_root`` overlays.
 
@@ -312,7 +347,7 @@ def _root_overlay_targets() -> set[str]:
         if not overlay.is_dir():
             continue
         for entry in overlay.iterdir():
-            if entry.name in _PROTECTED_ROOT_TARGETS:
+            if entry.name.casefold() in _PROTECTED_ROOT_TARGETS:
                 raise AdvanceError(
                     f".workshop/step_files/{step_dir.name}/{ROOT_OVERLAY_DIR}/{entry.name} "
                     f"targets a protected repo path ({entry.name}); rename the overlay entry."
@@ -416,19 +451,31 @@ def _is_restorable_backup(backup_dir: Path) -> bool:
         data = json.loads(manifest.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return isinstance(data, dict) and data.get("format_version") == BACKUP_FORMAT_VERSION
+    return (
+        isinstance(data, dict)
+        and data.get("format_version") == BACKUP_FORMAT_VERSION
+        # A well-formed v2 manifest always records an integer step (bool is
+        # rejected explicitly); anything else is a malformed or forged manifest.
+        and isinstance(data.get("step"), int)
+        and not isinstance(data.get("step"), bool)
+    )
 
 
 def _snapshot_current_step(step: int) -> Path | None:
     """Atomically (re)create ``workshop_backups/step-<step>/`` for the current work.
 
-    Builds the snapshot in a staging directory, copies ``travel_assistant/`` and
-    the root overlay targets into their namespaces, writes the completion
-    manifest last, then swaps it into place. Any prior ``step-<step>/`` snapshot
-    is fully **replaced** — never merged — so files the learner deleted on a
-    revisit are not resurrected by a later ``--back``. The old snapshot is only
-    removed once the replacement is complete, so a mid-copy failure never leaves
-    the step without a valid backup.
+    Builds the snapshot in a staging directory, always copies ``travel_assistant/``
+    (even when it only holds a ``.gitkeep`` placeholder) plus any root overlay
+    targets into their namespaces, writes the completion manifest last, then swaps
+    it into place. Any prior ``step-<step>/`` snapshot is fully **replaced** — never
+    merged — so files the learner deleted on a revisit are not resurrected by a
+    later ``--back``.
+
+    Publication is crash-safe: the prior snapshot is renamed aside first, the new
+    snapshot is renamed into place, and only then is the old copy deleted. If the
+    swap fails, the prior snapshot is rolled back, so there is never a moment where
+    the step has no valid backup. The staging directory is removed on every failure
+    path.
 
     Returns the published path, or ``None`` when there was nothing worth backing
     up (empty ``travel_assistant/`` and no root targets), in which case any stale
@@ -451,18 +498,38 @@ def _snapshot_current_step(step: int) -> Path | None:
         return None
 
     staging = _reserve_backup_dir(f"step-{step}.staging")
-    if has_agent:
-        _backup_travel_assistant(staging)
-    if has_root:
-        _backup_root_targets(staging)
-    _write_backup_manifest(staging, step)
-
+    superseded: Path | None = None
     try:
+        # Always capture the agent namespace so a restore reproduces travel_assistant/
+        # exactly — including a lone .gitkeep — even when the only real work this
+        # step was root-level.
+        _backup_travel_assistant(staging)
+        if has_root:
+            _backup_root_targets(staging)
+        _write_backup_manifest(staging, step)
+
         if final.exists():
-            shutil.rmtree(final)
-        os.replace(staging, final)
-    except OSError as exc:
-        raise AdvanceError(f"Failed to publish backup {final}: {exc}") from exc
+            superseded = final.with_name(f"{final.name}.superseded")
+            try:
+                if superseded.exists():
+                    shutil.rmtree(superseded)
+                os.replace(final, superseded)
+            except OSError as exc:
+                raise AdvanceError(
+                    f"Failed to set aside previous backup {final}: {exc}"
+                ) from exc
+        try:
+            os.replace(staging, final)
+        except OSError as exc:
+            # Roll the prior snapshot back so a failed publish never loses it.
+            if superseded is not None and not final.exists():
+                os.replace(superseded, final)
+            raise AdvanceError(f"Failed to publish backup {final}: {exc}") from exc
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    if superseded is not None:
+        shutil.rmtree(superseded, ignore_errors=True)
     return final
 
 
@@ -474,19 +541,23 @@ def _restore_from_backup(backup_dir: Path) -> None:
     Restoration is therefore structural — the agent namespace is copied back into
     ``travel_assistant/`` and each entry under ``_root/`` back to the repo root —
     with no name-based routing, so a learner file inside ``travel_assistant/``
-    that happens to share a root-target name is never misrouted. Callers clear
-    both destinations first so the restore is exact.
+    that happens to share a root-target name is never misrouted.
+
+    Each destination is cleared immediately before it is copied, so the restore is
+    an exact replacement even for a backup entry whose target is no longer declared
+    by the current step files (e.g. after a template sync removed it) — the caller's
+    clear pass keys off the *currently* declared targets and would otherwise leave
+    such a directory to be merged into rather than replaced.
     """
 
     travel_dest = _path(TRAVEL_ASSISTANT_DIR)
-    try:
-        travel_dest.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise AdvanceError(f"Failed to create {travel_dest}: {exc}") from exc
-
     travel_source = backup_dir / BACKUP_AGENT_SUBDIR
-    if travel_source.is_dir():
-        _copy_tree(travel_source, travel_dest)
+    _replace_path_with(travel_source if travel_source.is_dir() else None, travel_dest)
+    if not travel_dest.exists():
+        try:
+            travel_dest.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise AdvanceError(f"Failed to create {travel_dest}: {exc}") from exc
 
     root_source = backup_dir / BACKUP_ROOT_SUBDIR
     if not root_source.is_dir():
@@ -496,15 +567,7 @@ def _restore_from_backup(backup_dir: Path) -> None:
     except OSError as exc:
         raise AdvanceError(f"Failed to read backup {root_source}: {exc}") from exc
     for entry in entries:
-        destination = _path(entry.name)
-        if entry.is_dir():
-            _copy_tree(entry, destination)
-        else:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                shutil.copy2(entry, destination)
-            except OSError as exc:
-                raise AdvanceError(f"Failed to copy {entry} to {destination}: {exc}") from exc
+        _replace_path_with(entry, _path(entry.name))
 
 
 def _validate_step_files_present(target_step: int) -> None:
