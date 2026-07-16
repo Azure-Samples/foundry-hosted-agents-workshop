@@ -21,7 +21,6 @@ from agent_framework import (
 )
 from agent_framework.azure import AzureAISearchContextProvider
 from agent_framework.foundry import FoundryChatClient, FoundryMemoryProvider
-from agent_framework.orchestrations import HandoffBuilder
 from agent_framework_foundry_hosting import FoundryToolbox
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity import DefaultAzureCredential
@@ -35,24 +34,10 @@ load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
 
-# The Coordinator owns the final deliverable: the LOCAL travel-guide skill (always
-# present) renders the PDF trip guide, and the FOUNDRY response-guardrails skill
-# checks the final answer. If you skipped the Foundry skill in Step 6, drop the
-# response-guardrails line below — see the Step 7 doc callout.
-COORDINATOR_INSTRUCTIONS = """You are TravelBuddy's Coordinator. Understand the traveler's request, route specialist work to the right agent, and synthesize a clear final answer.
-
-Routing:
-- FlightsSpecialist: flight timing, airports, routes, layovers, weather risk, arrival windows, and fare-related currency questions.
-- HotelsSpecialist: lodging areas, budgets, amenities, and neighbourhood trade-offs.
-- ActivitiesSpecialist: experiences, day trips, destination guidance, and day-by-day itineraries.
-- For a complete trip plan, hand off to each relevant specialist, then reconcile their answers into one plan.
-
-Final deliverable (you own this, the specialists do not):
-- Always use the travel-guide skill to turn the reconciled plan into a downloadable, shareable PDF trip guide.
-- Always apply the response-guardrails skill to your answer before you return it to the traveler.
-
-You are the only agent who talks to the traveler: specialists hand their work back to you, so when one hands back because a required detail is missing, ask the traveler yourself rather than routing to that specialist again.
-Ask a clarifying question only when a missing detail blocks the next useful step, and keep the traveler informed when you route work to a specialist."""
+# In Steps 8-9 the workflow (workflow.py) is the runtime — main.py hosts it, and it
+# builds its agent nodes from the specialist factories below. The finalize_itinerary
+# node owns the final deliverable (travel-guide PDF + response-guardrails); see
+# FINALIZE_INSTRUCTIONS in workflow.py.
 
 FLIGHTS_INSTRUCTIONS = """You are the Flights specialist for TravelBuddy.
 
@@ -67,7 +52,7 @@ Tools (always use these rather than answering from memory):
 
 Boundaries:
 - Do not choose hotels or activities.
-- Always hand back to the Coordinator when you finish your part, when the request turns to lodging, experiences, or the complete plan, or when a missing detail blocks your specialist work. The Coordinator is the only agent that talks to the traveler, so never ask the traveler directly; hand back and let the Coordinator relay any question."""
+- Cover only the flight part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer. If a detail you need is missing, say what's missing instead of guessing."""
 
 HOTELS_INSTRUCTIONS = """You are the Hotels specialist for TravelBuddy.
 
@@ -83,7 +68,7 @@ Tools (always use these rather than answering from memory):
 Boundaries:
 - Do not invent live availability.
 - Do not plan full-day activities unless they affect neighbourhood choice.
-- Always hand back to the Coordinator when you finish your part, when the request turns to flights, activities, or a complete itinerary, or when a missing detail blocks your specialist work. The Coordinator is the only agent that talks to the traveler, so never ask the traveler directly; hand back and let the Coordinator relay any question."""
+- Cover only the lodging part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer. If a detail you need is missing, say what's missing instead of guessing."""
 
 ACTIVITIES_INSTRUCTIONS = """You are the Activities specialist for TravelBuddy.
 
@@ -96,7 +81,7 @@ Tools (always use these rather than answering from memory):
 
 Boundaries:
 - Do not choose flights or hotels.
-- Always hand back to the Coordinator when you finish your part, when the itinerary needs flight or hotel constraints, or when a missing detail blocks your specialist work. The Coordinator is the only agent that talks to the traveler, so never ask the traveler directly; hand back and let the Coordinator relay any question."""
+- Cover only the activities part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer. If the itinerary needs a flight or hotel detail that isn't available yet, say what's missing instead of guessing."""
 
 
 def run_local_skill_script(
@@ -289,16 +274,12 @@ def make_client(credential=None) -> FoundryChatClient:
 
 
 # --- Specialist factories -------------------------------------------------
-# Extracted in Step 8 so the runtime Coordinator (this file) and the durable
-# workflow (workflow.py) build the *same* specialists from one source of truth.
+# One source of truth: the durable workflow (workflow.py) builds its agent nodes
+# from these factories.
 
 
 def create_flights_agent(client: FoundryChatClient, credential=None) -> Agent:
-    """Flights: weather + local time + currency, plus the toolbox (OctoTrip MCP is flight search).
-
-    require_per_service_call_history_persistence=True is required for the runtime
-    HandoffBuilder path and is harmless when the agent runs as a workflow executor.
-    """
+    """Flights: weather + local time + currency, plus the toolbox (OctoTrip MCP is flight search)."""
     credential = credential or DefaultAzureCredential()
     toolbox = FoundryToolbox(credential)
     memory = _build_memory_provider(client)
@@ -308,7 +289,6 @@ def create_flights_agent(client: FoundryChatClient, credential=None) -> Agent:
         instructions=FLIGHTS_INSTRUCTIONS,
         tools=[get_weather, get_local_time, convert_currency, toolbox],
         context_providers=[memory],
-        require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )
 
@@ -325,7 +305,6 @@ def create_hotels_agent(client: FoundryChatClient, credential=None) -> Agent:
         instructions=HOTELS_INSTRUCTIONS,
         tools=[convert_currency, toolbox],
         context_providers=[search, memory],
-        require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )
 
@@ -342,40 +321,5 @@ def create_activities_agent(client: FoundryChatClient, credential=None) -> Agent
         instructions=ACTIVITIES_INSTRUCTIONS,
         tools=[toolbox],
         context_providers=[search, memory],
-        require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )
-
-
-def build_travel_coordinator() -> Agent:
-    """Build the Step 7 Coordinator + specialists handoff, exposed as one agent."""
-    credential = DefaultAzureCredential()
-    client = make_client(credential)
-
-    coordinator = Agent(
-        client=client,
-        name="Coordinator",
-        instructions=COORDINATOR_INSTRUCTIONS,
-        # Coordinator owns the final deliverable: travel-guide (PDF) + response-guardrails.
-        context_providers=[_build_skills_provider()],
-        require_per_service_call_history_persistence=True,
-        default_options={"store": False},
-    )
-    flights = create_flights_agent(client, credential)
-    hotels = create_hotels_agent(client, credential)
-    activities = create_activities_agent(client, credential)
-
-    workflow = (
-        HandoffBuilder(
-            name="travelbuddy-runtime-handoff",
-            participants=[coordinator, flights, hotels, activities],
-        )
-        .with_start_agent(coordinator)
-        .add_handoff(coordinator, [flights, hotels, activities])
-        .add_handoff(flights, [coordinator])
-        .add_handoff(hotels, [coordinator])
-        .add_handoff(activities, [coordinator])
-        .build()
-    )
-
-    return workflow.as_agent()

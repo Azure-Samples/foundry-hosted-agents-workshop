@@ -21,7 +21,7 @@ from agent_framework import (
 )
 from agent_framework.azure import AzureAISearchContextProvider
 from agent_framework.foundry import FoundryChatClient
-from agent_framework.orchestrations import HandoffBuilder
+from agent_framework.orchestrations import GroupChatBuilder
 from agent_framework_foundry_hosting import FoundryToolbox
 from azure.ai.projects.aio import AIProjectClient
 from azure.identity import DefaultAzureCredential
@@ -35,24 +35,31 @@ load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
 
-# The Coordinator owns the final deliverable: the LOCAL travel-guide skill (always
-# present) renders the PDF trip guide, and the FOUNDRY response-guardrails skill
-# checks the final answer. If you skipped the Foundry skill in Step 6, drop the
-# response-guardrails line below — see the Step 7 doc callout.
-COORDINATOR_INSTRUCTIONS = """You are TravelBuddy's Coordinator. Understand the traveler's request, route specialist work to the right agent, and synthesize a clear final answer.
+# The Coordinator is the group chat MANAGER (the GroupChatBuilder orchestrator): each
+# round it reads the conversation and returns a STRUCTURED routing decision
+# (which specialist speaks next, or terminate with the final answer). The framework
+# doesn't strip a manager's tools, but a skill it carried wouldn't reliably fire —
+# its turn produces that routing decision, not a free tool-driven answer — so, unlike
+# Steps 1-6, this Coordinator deliberately has no tools and no context providers.
+# The final deliverable — the travel-guide PDF and the response-guardrails check —
+# therefore rides on the Activities specialist (a group chat participant that owns the
+# skills provider). The manager selects Activities last and relays its guarded guide as
+# the final answer. Step 8's workflow adds a dedicated finalize node that CAN own the
+# deliverable and guard the actual final synthesis. See the Step 7 doc for the full
+# explanation.
+COORDINATOR_INSTRUCTIONS = """You are TravelBuddy's Coordinator — the manager of a group chat between three specialists (FlightsSpecialist, HotelsSpecialist, ActivitiesSpecialist). Read the traveler's request and the conversation so far, then decide who should speak next, or whether the plan is complete.
 
 Routing:
 - FlightsSpecialist: flight timing, airports, routes, layovers, weather risk, arrival windows, and fare-related currency questions.
 - HotelsSpecialist: lodging areas, budgets, amenities, and neighbourhood trade-offs.
-- ActivitiesSpecialist: experiences, day trips, destination guidance, and day-by-day itineraries.
-- For a complete trip plan, hand off to each relevant specialist, then reconcile their answers into one plan.
+- ActivitiesSpecialist: experiences, day trips, destination guidance, day-by-day itineraries, and the downloadable PDF trip guide.
 
-Final deliverable (you own this, the specialists do not):
-- Always use the travel-guide skill to turn the reconciled plan into a downloadable, shareable PDF trip guide.
-- Always apply the response-guardrails skill to your answer before you return it to the traveler.
-
-You are the only agent who talks to the traveler: specialists hand their work back to you, so when one hands back because a required detail is missing, ask the traveler yourself rather than routing to that specialist again.
-Ask a clarifying question only when a missing detail blocks the next useful step, and keep the traveler informed when you route work to a specialist."""
+Managing the conversation:
+- Pick the ONE specialist who owns the next missing piece of the answer, and let each specialist finish before you choose the next one.
+- For a complete trip plan, gather flight and hotel details first, then choose ActivitiesSpecialist LAST so it folds everything into the itinerary, produces the final PDF trip guide, and runs the response-guardrails check.
+- Terminate once the traveler's request is fully answered. When you terminate, write the final answer for the traveler: present the complete plan, and include the ActivitiesSpecialist's guarded guide and its PDF link verbatim — do not rewrite or drop them.
+- If a required detail is missing and blocks progress, terminate and ask the traveler that one question directly as the final answer, rather than looping a specialist.
+- You never call tools yourself — only the specialists do. You route and synthesize."""
 
 FLIGHTS_INSTRUCTIONS = """You are the Flights specialist for TravelBuddy.
 
@@ -67,7 +74,7 @@ Tools (always use these rather than answering from memory):
 
 Boundaries:
 - Do not choose hotels or activities.
-- Always hand back to the Coordinator when you finish your part, when the request turns to lodging, experiences, or the complete plan, or when a missing detail blocks your specialist work. The Coordinator is the only agent that talks to the traveler, so never ask the traveler directly; hand back and let the Coordinator relay any question."""
+- Cover only the flight part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly. If a detail you need is missing, say what's missing instead of guessing."""
 
 HOTELS_INSTRUCTIONS = """You are the Hotels specialist for TravelBuddy.
 
@@ -83,20 +90,29 @@ Tools (always use these rather than answering from memory):
 Boundaries:
 - Do not invent live availability.
 - Do not plan full-day activities unless they affect neighbourhood choice.
-- Always hand back to the Coordinator when you finish your part, when the request turns to flights, activities, or a complete itinerary, or when a missing detail blocks your specialist work. The Coordinator is the only agent that talks to the traveler, so never ask the traveler directly; hand back and let the Coordinator relay any question."""
+- Cover only the lodging part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly. If a detail you need is missing, say what's missing instead of guessing."""
 
+# Activities owns the final deliverable in Step 7 (see the Coordinator note above): the
+# LOCAL travel-guide skill (always present) renders the PDF trip guide, and the FOUNDRY
+# response-guardrails skill checks the answer. If you skipped the Foundry skill in Step 6,
+# drop the response-guardrails line below and serve only the local skill — see the Step 7 doc.
 ACTIVITIES_INSTRUCTIONS = """You are the Activities specialist for TravelBuddy.
 
 Scope:
 - Suggest experiences, day trips, food areas, museum days, outdoor options, and rainy-day alternatives.
+- Produce the trip's downloadable, shareable PDF guide once the plan is clear.
 
 Tools (always use these rather than answering from memory):
 - Grounded destination knowledge (the destinations index) before making specific recommendations.
 - The toolbox's web search for current events, advisories, and source-backed guidance.
 
+Skills (always use these):
+- Use the travel-guide skill to turn the plan into a downloadable, shareable PDF trip guide.
+- Apply the response-guardrails skill to every response you produce.
+
 Boundaries:
 - Do not choose flights or hotels.
-- Always hand back to the Coordinator when you finish your part, when the itinerary needs flight or hotel constraints, or when a missing detail blocks your specialist work. The Coordinator is the only agent that talks to the traveler, so never ask the traveler directly; hand back and let the Coordinator relay any question."""
+- You are usually chosen LAST, so fold the flight and hotel details already in the conversation into the itinerary and the final PDF guide. Then stop — the Coordinator relays your guarded guide to the traveler. If the itinerary needs a flight or hotel detail that isn't in the conversation yet, say what's missing rather than guessing."""
 
 
 def run_local_skill_script(
@@ -257,7 +273,7 @@ def _build_skills_provider() -> TrustedSkillsProvider:
 
 
 def build_travel_coordinator() -> Agent:
-    """Build the Coordinator + specialists handoff and expose it as a single agent."""
+    """Build the Coordinator + specialists group chat and expose it as a single agent."""
     credential = DefaultAzureCredential()
     client = FoundryChatClient(
         project_endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
@@ -267,20 +283,21 @@ def build_travel_coordinator() -> Agent:
 
     # Carried capabilities from Steps 4-6, wired per agent below. The skills provider
     # (LOCAL travel-guide + the FOUNDRY response-guardrails skill downloaded at
-    # startup, see _build_skills_provider) now belongs to the Coordinator.
+    # startup, see _build_skills_provider) rides on the Activities participant —
+    # a skill on the group chat manager (Coordinator) wouldn't reliably fire, since its
+    # turn returns a structured routing decision (see COORDINATOR_INSTRUCTIONS).
     toolbox = FoundryToolbox(credential)
     search = _build_search_provider(credential)
     skills = _build_skills_provider()
 
-    # HandoffBuilder short-circuits tool calls during a handoff, so every participant
-    # must set require_per_service_call_history_persistence=True or build() raises.
+    # The Coordinator is the group chat MANAGER (orchestrator_agent): each round it
+    # returns a structured next-speaker/terminate decision, so it has no tools and no
+    # context providers. The `description` fields on the specialists feed the manager's
+    # auto-generated routing prompt, so keep them crisp.
     coordinator = Agent(
         client=client,
         name="Coordinator",
         instructions=COORDINATOR_INSTRUCTIONS,
-        # Coordinator owns the final deliverable: travel-guide (PDF) + response-guardrails.
-        context_providers=[skills],
-        require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )
 
@@ -288,9 +305,9 @@ def build_travel_coordinator() -> Agent:
     flights = Agent(
         client=client,
         name="FlightsSpecialist",
+        description="Handles flight timing, routing, airport, weather-risk, and currency questions.",
         instructions=FLIGHTS_INSTRUCTIONS,
         tools=[get_weather, get_local_time, convert_currency, toolbox],
-        require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )
 
@@ -298,34 +315,40 @@ def build_travel_coordinator() -> Agent:
     hotels = Agent(
         client=client,
         name="HotelsSpecialist",
+        description="Handles hotel area, budget, amenity, and lodging trade-off questions.",
         instructions=HOTELS_INSTRUCTIONS,
         tools=[convert_currency, toolbox],
         context_providers=[search],
-        require_per_service_call_history_persistence=True,
         default_options={"store": False},
     )
 
-    # Activities: toolbox (web/reference) + grounded destination knowledge (RAG).
+    # Activities: toolbox (web/reference) + grounded destination knowledge (RAG) +
+    # the skills provider, so this participant owns the travel-guide PDF and response-guardrails.
     activities = Agent(
         client=client,
         name="ActivitiesSpecialist",
+        description="Handles experiences, day trips, local guidance, and itinerary-building questions.",
         instructions=ACTIVITIES_INSTRUCTIONS,
         tools=[toolbox],
-        context_providers=[search],
-        require_per_service_call_history_persistence=True,
+        context_providers=[search, skills],
         default_options={"store": False},
     )
 
+    # GroupChatBuilder wires a manager (orchestrator_agent) to each participant with
+    # bidirectional edges: every round the Coordinator picks the next specialist or
+    # terminates with the final answer, then the workflow completes (IDLE) — it never
+    # parks on a request_info, so a follow-up question in the same conversation is just
+    # the next run against the restored history. max_rounds caps the number of
+    # orchestrator rounds; note the round counter is checkpoint-restored, so the cap is
+    # CUMULATIVE across the whole hosted conversation, not per turn. A normal turn ends
+    # when the Coordinator terminates well before the cap; 40 leaves ample headroom for a
+    # multi-turn planning session while still stopping a manager that never terminates.
     workflow = (
-        HandoffBuilder(
-            name="travelbuddy-runtime-handoff",
-            participants=[coordinator, flights, hotels, activities],
+        GroupChatBuilder(
+            participants=[flights, hotels, activities],
+            orchestrator_agent=coordinator,
+            max_rounds=40,
         )
-        .with_start_agent(coordinator)
-        .add_handoff(coordinator, [flights, hotels, activities])
-        .add_handoff(flights, [coordinator])
-        .add_handoff(hotels, [coordinator])
-        .add_handoff(activities, [coordinator])
         .build()
     )
 

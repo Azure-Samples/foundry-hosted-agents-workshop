@@ -1,0 +1,163 @@
+name: Sync template infra
+
+# Pull the latest workshop machinery (.workshop/ and .github/) from the upstream
+# template into this instance WITHOUT advancing the current step. Participant work
+# (travel_assistant/), per-instance state (.workshop_instance/), and .env are never
+# touched, and README.md is never re-rendered — the current step's instructions
+# stay exactly as they are. To re-lay the current step's clean starter files and
+# re-render its README, use the separate "Reset current step" workflow. The sync
+# commit carries a "[skip-advance]" sentinel that
+# advance-on-push.yml honors, so pushing it to the default branch refreshes the
+# machinery but does not move to the next step.
+#
+# Tokenless by design: GitHub does not allow the built-in GITHUB_TOKEN to push
+# changes to files under .github/workflows/. Rather than require a Personal Access
+# Token, this workflow runs the sync with --skip-workflows, so it never modifies
+# workflow files and the default GITHUB_TOKEN is always sufficient. No secret is
+# needed. When the upstream workflow files themselves change, this run reports it
+# in the summary; adopt those updates by running the sync locally, where your Git
+# credentials carry the `workflow` scope:
+#   python .workshop/scripts/sync_template.py --auto-commit --push
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_url:
+        description: "Upstream template git URL to sync from."
+        required: false
+        default: "https://github.com/Azure-Samples/foundry-hosted-agents-workshop.git"
+        type: string
+      ref:
+        description: "Upstream branch or tag to sync from."
+        required: false
+        default: "main"
+        type: string
+      dry_run:
+        description: "Only report what would change; do not commit or push."
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared with init-workshop.yml, start-workshop.yml, reset-workshop.yml and
+  # advance-on-push.yml so every workflow that pushes to the default branch
+  # serializes and never races another on `git push`.
+  group: workshop-state-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Skip in the template repository itself — syncing the template from itself is
+    # a no-op and the script guards against it anyway.
+    if: github.event.repository.is_template == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # The default GITHUB_TOKEN is enough because --skip-workflows keeps the
+          # sync from ever touching .github/workflows/ (the one thing this token
+          # cannot push). No PAT / secret is required.
+          persist-credentials: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # sync_template.py is stdlib-only, so no pip install is needed.
+
+      - name: Stage upstream changes
+        id: sync
+        shell: bash
+        env:
+          # Pass user-supplied inputs through the environment rather than
+          # interpolating them straight into the script, so a crafted value
+          # cannot break out of quoting or inject shell commands.
+          UPSTREAM_URL: ${{ inputs.upstream_url }}
+          UPSTREAM_REF: ${{ inputs.ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          dry_flag=()
+          if [[ "$DRY_RUN" == "true" ]]; then
+            dry_flag=(--dry-run)
+          fi
+          # --skip-workflows keeps this run tokenless (see the header comment).
+          python .workshop/scripts/sync_template.py \
+            --upstream-url "$UPSTREAM_URL" \
+            --ref "$UPSTREAM_REF" \
+            --skip-workflows \
+            "${dry_flag[@]}"
+
+          # Report whether upstream workflow files differ so the summary can point
+          # the maintainer at the local sync. FETCH_HEAD is set by the script's
+          # fetch above; the skipped workflows are unchanged in HEAD.
+          if git rev-parse --verify --quiet FETCH_HEAD >/dev/null \
+             && [[ -n "$(git diff --name-only HEAD FETCH_HEAD -- .github/workflows)" ]]; then
+            echo "workflows_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "workflows_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -z "$(git diff --cached --name-only)" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit & push
+        if: steps.sync.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The [skip-advance] sentinel keeps advance-on-push.yml from advancing.
+          # Keep it in sync with SKIP_ADVANCE_SENTINEL in sync_template.py.
+          git commit -q -m "workshop: sync template infra from upstream [skip-advance]"
+          git push
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        env:
+          UPSTREAM_URL: ${{ inputs.upstream_url }}
+          UPSTREAM_REF: ${{ inputs.ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CHANGED: ${{ steps.sync.outputs.changed }}
+          WORKFLOWS_CHANGED: ${{ steps.sync.outputs.workflows_changed }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "## 🔍 Dry run — no changes committed" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Re-run with **Dry run = false** to apply the changes above." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$CHANGED" == "true" ]]; then
+            echo "## ✅ Template infra synced" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Pulled the latest \`.workshop/\` and \`.github/\` (excluding \`.github/workflows/\`) from \`${UPSTREAM_REF}\` of \`${UPSTREAM_URL}\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "Your current step was preserved. Run \`git pull\` locally to refresh." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## ✅ Already up to date" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "No differences between this instance and the upstream template's synced paths." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ "$WORKFLOWS_CHANGED" == "true" ]]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ⚠️ Workflow updates were skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Upstream changed files under \`.github/workflows/\`, which this workflow never touches (the built-in token cannot push them)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Adopt the workflow updates by running the sync locally, where your Git credentials carry the \`workflow\` scope:" >> "$GITHUB_STEP_SUMMARY"
+            echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+            echo "python .workshop/scripts/sync_template.py --auto-commit --push" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi

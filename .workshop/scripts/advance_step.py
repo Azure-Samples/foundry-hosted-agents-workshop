@@ -61,6 +61,40 @@ _PROTECTED_ROOT_TARGETS = frozenset(
     {TRAVEL_ASSISTANT_DIR, README_FILE, ".workshop", ".workshop_instance", ".git"}
 )
 SCHEMA_VERSION = 1
+# Commit-message sentinel that advance-on-push.yml looks for to suppress an
+# auto-advance. reset-current re-lays the CURRENT step (it must not move to the
+# next one), and it rewrites the state file to the *same* step — often a no-op
+# diff — so the state-file guard in advance-on-push.yml cannot be relied on to
+# catch it. The sentinel is the explicit, robust signal that a push must not
+# advance. Keep this literal in sync with sync_template.SKIP_ADVANCE_SENTINEL and
+# the SENTINEL in .github/workflows/advance-on-push.yml.
+SKIP_ADVANCE_SENTINEL = "[skip-advance]"
+# Repo paths that are workshop machinery or platform scaffolding — never the
+# participant's delivery (travel_assistant/ and the _root overlay siblings such
+# as travel_toolbox/, travel_indexer/, foundry_skills/). A push that changes ONLY
+# these paths is not step progress, so advance-on-push.yml must not advance the
+# workshop on it. This lets a participant pull the latest machinery (.github/,
+# .workshop/, Makefile, …) and push it — even MANUALLY, without the
+# [skip-advance] sentinel the sync tooling adds — without being bumped to the
+# next step. This is the single source of truth: advance-on-push.yml classifies a
+# push by piping its changed paths to `advance_step.py --check-machinery-only`, so
+# the list is never duplicated in the workflow.
+MACHINERY_PATHS = (
+    ".github",
+    ".workshop",
+    ".workshop_instance",
+    ".devcontainer",
+    ".vscode",
+    "Makefile",
+    "README.md",
+    ".env.example",
+    ".gitignore",
+    ".gitattributes",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "SUPPORT.md",
+    "LICENSE",
+)
 # Paths that --auto-commit is allowed to stage. Limited to workshop-owned
 # locations so unrelated local edits, untracked files, or secrets are never
 # swept into a commit by accident.
@@ -77,6 +111,47 @@ _REMOTE_RE = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 class AdvanceError(RuntimeError):
     """Raised when the workshop cannot be advanced safely."""
+
+
+def _is_machinery_path(path: str) -> bool:
+    """Return True when ``path`` is workshop machinery/platform, not delivery.
+
+    A path matches when it equals a ``MACHINERY_PATHS`` entry or sits under one
+    (prefix + "/"). Leading/trailing slashes and whitespace are ignored so the
+    check is robust to however the caller formats the path.
+    """
+
+    normalized = path.strip().strip("/")
+    if not normalized:
+        return False
+    return any(
+        normalized == entry or normalized.startswith(f"{entry}/")
+        for entry in MACHINERY_PATHS
+    )
+
+
+def _is_machinery_only_push(paths: Sequence[str]) -> bool:
+    """Return True when a non-empty set of changed ``paths`` is *all* machinery.
+
+    An empty set is not machinery-only: with nothing to classify there is no
+    basis to suppress an advance, so the caller falls through to its normal
+    behavior.
+    """
+
+    changed = [p for p in (path.strip() for path in paths) if p]
+    return bool(changed) and all(_is_machinery_path(p) for p in changed)
+
+
+def _run_check_machinery_only() -> int:
+    """Print ``true``/``false`` for the newline-separated paths read from stdin.
+
+    Used by ``.github/workflows/advance-on-push.yml`` to decide whether a push
+    touched only workshop machinery (and therefore must not advance the step).
+    """
+
+    paths = sys.stdin.read().splitlines()
+    print("true" if _is_machinery_only_push(paths) else "false")
+    return 0
 
 
 def _step_dir_name(step: int) -> str:
@@ -1127,6 +1202,74 @@ def _back(*, dry_run: bool, auto_commit: bool) -> int:
     return 0
 
 
+def _plan_relay_current(current_step: int) -> list[str]:
+    """Return human-readable reset-current actions for dry-run output."""
+
+    name = STEP_TITLES.get(current_step, "")
+    label = f"step {current_step}: {name}" if name else f"step {current_step}"
+    return [
+        "Would back up travel_assistant/ and workshop root files to "
+        f".workshop_instance/workshop_backups/reset-current-{current_step:02d}-<timestamp>/.",
+        "Would clear travel_assistant/ and re-lay the clean starter files for "
+        f"{label} from .workshop/step_files/{_step_dir_name(current_step)}/.",
+        f"Would re-render README.md for {label}.",
+        f"Would leave {STATE_FILE} unchanged at current_step {current_step}.",
+        f"Would export NEW_STEP={current_step} if GITHUB_ENV is set.",
+    ]
+
+
+def _relay_current(*, dry_run: bool, auto_commit: bool) -> int:
+    """Re-lay the *current* step's clean starter files and re-render its README.
+
+    Unlike ``--reset`` (which drops back to step 0), this keeps the learner on
+    their current step but discards local edits to travel_assistant/ in favor of
+    the canonical starter files, after backing that work up. It is the companion
+    to a template sync: sync refreshes the machinery, reset-current refreshes the
+    current step's delivery files and instructions.
+    """
+
+    current_step = _load_state()
+    _validate_state_sync(current_step, _read_readme_marker())
+
+    # Fail loudly if this step ships no starter files: without them we would back
+    # up and wipe travel_assistant/ (via _lay_down_step_files) yet lay nothing
+    # back down, leaving the learner with an empty folder while reporting success.
+    source = _path(STEP_FILES_DIR) / _step_dir_name(current_step)
+    if not source.is_dir():
+        raise AdvanceError(
+            f"Cannot reset current step {current_step}: "
+            f".workshop/step_files/{_step_dir_name(current_step)}/ is missing. "
+            "The authoring material for this step is incomplete — nothing was changed."
+        )
+
+    commit_message = f"workshop: reset current step {current_step} {SKIP_ADVANCE_SENTINEL}"
+    if dry_run:
+        print(f"DRY RUN: resetting current step {current_step} to its clean starter files")
+        for action in _plan_relay_current(current_step):
+            print(action)
+        if auto_commit:
+            print(f"Would auto-commit workshop-owned paths with message '{commit_message}'.")
+        return 0
+
+    backup_destination = _reserve_backup_dir(f"reset-current-{current_step:02d}")
+    if _backup_travel_assistant(backup_destination):
+        print(f"Backed up travel_assistant/ to {backup_destination.relative_to(REPO_ROOT)}")
+    if _backup_root_targets(backup_destination):
+        print(f"Backed up workshop root files to {backup_destination.relative_to(REPO_ROOT)}")
+
+    _lay_down_step_files(current_step, clear_existing=True)
+    _write_text(_path(README_FILE), _render_readme(current_step))
+    # State is already on current_step; rewrite it so schema/format stays canonical.
+    _write_state(current_step)
+    _export_new_step(current_step)
+    name = STEP_TITLES.get(current_step, "")
+    label = f"step {current_step}: {name}" if name else f"step {current_step}"
+    print(f"Reset current step to clean starter files: {label}")
+    if auto_commit:
+        _auto_commit(commit_message)
+    return 0
+
+
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     """Parse command-line arguments."""
 
@@ -1144,6 +1287,17 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--reset", action="store_true", help="Reset the workshop to step 0.")
+    mode_group.add_argument(
+        "--reset-current",
+        dest="reset_current",
+        action="store_true",
+        help=(
+            "Re-lay the CURRENT step's clean starter files and re-render its "
+            "README, backing up travel_assistant/ first. Stays on the current "
+            "step (unlike --reset, which returns to step 0). Pairs with a "
+            "template sync when you want the current step refreshed too."
+        ),
+    )
     mode_group.add_argument(
         "--init",
         action="store_true",
@@ -1169,6 +1323,17 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
             "step otherwise. Emits advanced=true|false to $GITHUB_OUTPUT."
         ),
     )
+    mode_group.add_argument(
+        "--check-machinery-only",
+        dest="check_machinery_only",
+        action="store_true",
+        help=(
+            "Read newline-separated repo paths from stdin and print 'true' when "
+            "they are ALL workshop machinery/platform files (so a push touching "
+            "only them must not advance the step), otherwise 'false'. Used by "
+            "advance-on-push.yml to guard manual machinery pushes."
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print planned actions only.")
     parser.add_argument(
         "--auto-commit",
@@ -1188,12 +1353,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
+        if args.check_machinery_only:
+            return _run_check_machinery_only()
         if args.init:
             return _init(dry_run=args.dry_run)
         if args.reset:
             return _reset(dry_run=args.dry_run, auto_commit=args.auto_commit)
         if args.back:
             return _back(dry_run=args.dry_run, auto_commit=args.auto_commit)
+        if args.reset_current:
+            return _relay_current(dry_run=args.dry_run, auto_commit=args.auto_commit)
         if args.on_push:
             return _advance_on_push(dry_run=args.dry_run)
         return _advance(args.expected, dry_run=args.dry_run, auto_commit=args.auto_commit)

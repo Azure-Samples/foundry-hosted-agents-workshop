@@ -1,4 +1,5 @@
 import json
+import io
 import shutil
 import subprocess
 import sys
@@ -274,6 +275,109 @@ def test_reset_backs_up_and_returns_to_step_zero(workshop_repo):
     assert (backups[0] / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "step 5 work"
     assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "reset starter"
     assert not (workshop_repo / "travel_assistant" / "old.txt").exists()
+
+
+def test_reset_current_relays_current_step_and_backs_up(workshop_repo, monkeypatch):
+    # Learner is on step 5 with local edits. reset-current re-lays the clean
+    # step 5 starter set and re-renders step 5's README, but STAYS on step 5.
+    _write_state(workshop_repo, 5)
+    _write_readme(workshop_repo, 5)
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("my edits", encoding="utf-8")
+    (workshop_repo / "travel_assistant" / "scratch.txt").write_text("remove me", encoding="utf-8")
+    _create_step_files(workshop_repo, 5, "step 5 starter")
+    github_env = workshop_repo / "github.env"
+    monkeypatch.setenv("GITHUB_ENV", str(github_env))
+
+    result = advance_step.main(["--reset-current"])
+
+    assert result == 0
+    # Still on step 5 — never dropped back to 0.
+    assert json.loads((workshop_repo / ".workshop_instance" / ".workshop-state.json").read_text())["current_step"] == 5
+    assert "# Synthetic step 5" in (workshop_repo / "README.md").read_text(encoding="utf-8")
+    # Learner edits backed up, then replaced by the clean starter; stray file gone.
+    backups = list((workshop_repo / ".workshop_instance" / "workshop_backups").glob("reset-current-05-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "my edits"
+    assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "step 5 starter"
+    assert not (workshop_repo / "travel_assistant" / "scratch.txt").exists()
+    assert github_env.read_text(encoding="utf-8") == "NEW_STEP=5\n"
+
+
+@_requires_git
+def test_reset_current_auto_commit_creates_commit(workshop_repo):
+    _write_state(workshop_repo, 4)
+    _write_readme(workshop_repo, 4)
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("step 4 work", encoding="utf-8")
+    _create_step_files(workshop_repo, 4, "step 4 starter")
+    _git_init_with_identity(workshop_repo)
+
+    result = advance_step.main(["--reset-current", "--auto-commit"])
+
+    assert result == 0
+    log = _git(workshop_repo, "log", "-1", "--format=%s").stdout.strip()
+    assert log == "workshop: reset current step 4 [skip-advance]"
+
+
+@_requires_git
+def test_reset_current_commit_carries_skip_advance_when_state_unchanged(workshop_repo):
+    # reset-current rewrites the state file to the SAME step, so when state is
+    # already canonical there is no state-file diff for advance-on-push.yml to key
+    # off. The [skip-advance] sentinel is therefore what must keep a pushed
+    # reset-current commit from advancing the learner — assert it is always there,
+    # even when travel_assistant/ is the only workshop-owned change.
+    _write_readme(workshop_repo, 6)
+    _create_step_files(workshop_repo, 6, "step 6 starter")
+    # Seed the state file in advance_step's own canonical format so a later
+    # re-write produces a byte-identical file (no state-file diff).
+    advance_step._write_state(6)
+    _git_init_with_identity(workshop_repo)
+    _git(workshop_repo, "add", "-A")
+    _git(workshop_repo, "commit", "-q", "-m", "canonical step 6")
+    # Now the learner edits travel_assistant/ only.
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("local edit", encoding="utf-8")
+    _git(workshop_repo, "add", "-A")
+    _git(workshop_repo, "commit", "-q", "-m", "learner work")
+
+    result = advance_step.main(["--reset-current", "--auto-commit"])
+
+    assert result == 0
+    body = _git(workshop_repo, "log", "-1", "--format=%B").stdout
+    assert advance_step.SKIP_ADVANCE_SENTINEL in body
+    # The state file was byte-identical, so it is NOT part of this commit — proving
+    # the sentinel (not a state-file change) is what suppresses the advance.
+    changed = _git(workshop_repo, "show", "--name-only", "--pretty=format:", "HEAD").stdout
+    assert ".workshop_instance/.workshop-state.json" not in changed
+
+
+def test_reset_current_errors_when_step_files_missing(workshop_repo, capsys):
+    # The current step ships no starter files. reset-current must refuse loudly
+    # instead of backing up + wiping travel_assistant/ and reporting success with
+    # nothing laid back down.
+    _write_state(workshop_repo, 3)
+    _write_readme(workshop_repo, 3)
+    (workshop_repo / "travel_assistant" / "stub.txt").write_text("my work", encoding="utf-8")
+    # Deliberately do NOT create .workshop/step_files/03/.
+    original_readme = (workshop_repo / "README.md").read_text(encoding="utf-8")
+
+    result = advance_step.main(["--reset-current"])
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "step_files/03/ is missing" in captured.err
+    # Nothing was touched: work preserved, no backup taken, README unchanged.
+    assert (workshop_repo / "travel_assistant" / "stub.txt").read_text(encoding="utf-8") == "my work"
+    assert (workshop_repo / "README.md").read_text(encoding="utf-8") == original_readme
+    assert not list((workshop_repo / ".workshop_instance" / "workshop_backups").glob("*"))
+
+
+def test_reset_and_reset_current_are_mutually_exclusive(workshop_repo, capsys):
+    _write_state(workshop_repo, 0)
+    _write_readme(workshop_repo, 0)
+
+    with pytest.raises(SystemExit):
+        advance_step.main(["--reset", "--reset-current"])
+    captured = capsys.readouterr()
+    assert "not allowed with argument" in captured.err or "argument --reset" in captured.err
 
 
 def test_init_lays_down_step_zero_without_backup(workshop_repo, monkeypatch):
@@ -1370,3 +1474,128 @@ def test_reset_backups_are_unique_within_same_second(workshop_repo, monkeypatch)
     assert len(reset_dirs) == 2, f"expected two distinct reset dirs, got {reset_dirs}"
 
 
+# --- machinery-only push classification (advance-on-push guard #4) -----------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/workflows/advance-on-push.yml",
+        ".workshop/scripts/sync_template.py",
+        ".workshop_instance/workshop_backups/x",
+        ".devcontainer/devcontainer.json",
+        ".vscode/settings.json",
+        "Makefile",
+        "README.md",
+        ".env.example",
+        ".gitignore",
+        "CONTRIBUTING.md",
+        ".github",
+    ],
+)
+def test_is_machinery_path_true_for_machinery(path):
+    assert advance_step._is_machinery_path(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "travel_assistant/main.py",
+        "travel_assistant",
+        "travel_toolbox/toolbox.yaml",
+        "travel_indexer/provision_index.py",
+        "foundry_skills/skills/x/SKILL.md",
+        ".github-notes/readme",  # near-miss: not under .github/
+        ".workshopped/file",  # near-miss: not under .workshop/
+        "",
+    ],
+)
+def test_is_machinery_path_false_for_delivery_and_near_misses(path):
+    assert advance_step._is_machinery_path(path) is False
+
+
+def test_is_machinery_only_push_true_when_all_machinery():
+    changed = [".github/workflows/ci.yml", "Makefile", ".workshop/scripts/x.py"]
+    assert advance_step._is_machinery_only_push(changed) is True
+
+
+def test_is_machinery_only_push_false_when_any_delivery():
+    changed = ["Makefile", "travel_assistant/main.py"]
+    assert advance_step._is_machinery_only_push(changed) is False
+
+
+def test_is_machinery_only_push_false_for_root_overlay_delivery():
+    """A push that only touches a _root overlay sibling is real progress."""
+
+    assert advance_step._is_machinery_only_push(["travel_toolbox/toolbox.yaml"]) is False
+
+
+def test_is_machinery_only_push_false_when_empty():
+    """No changed paths => no basis to suppress an advance."""
+
+    assert advance_step._is_machinery_only_push([]) is False
+    assert advance_step._is_machinery_only_push(["", "  ", "\n"]) is False
+
+
+def test_check_machinery_only_cli_prints_true(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(".github/workflows/ci.yml\nMakefile\n.workshop/x.py\n"),
+    )
+
+    result = advance_step.main(["--check-machinery-only"])
+
+    assert result == 0
+    assert capsys.readouterr().out.strip() == "true"
+
+
+def test_check_machinery_only_cli_prints_false_for_mixed(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO("Makefile\ntravel_assistant/main.py\n"),
+    )
+
+    result = advance_step.main(["--check-machinery-only"])
+
+    assert result == 0
+    assert capsys.readouterr().out.strip() == "false"
+
+
+def test_machinery_paths_cover_every_tracked_root_entry():
+    """Guard MACHINERY_PATHS against drifting behind new root-level template files.
+
+    Every tracked top-level path in the *real* repo must classify as either
+    machinery (``MACHINERY_PATHS``) or known delivery (``travel_assistant/`` or a
+    ``_root`` overlay sibling like ``travel_toolbox/``). If upstream later adds a
+    new root-level machinery file (e.g. ``.editorconfig``) and nobody adds it to
+    ``MACHINERY_PATHS``, a participant who manually pulls and pushes only that
+    file would be wrongly advanced — reintroducing the exact bug this guard
+    fixes. This test fails loudly in that case, forcing the maintainer to
+    classify the new path.
+
+    Runs against the real repository root (this test intentionally does NOT use
+    the ``workshop_repo`` fixture, so ``advance_step.REPO_ROOT`` is unpatched).
+    """
+
+    repo_root = advance_step.REPO_ROOT
+    tracked = subprocess.run(
+        ["git", "ls-files"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+    top_level = {line.split("/", 1)[0] for line in tracked if line}
+
+    delivery = {advance_step.TRAVEL_ASSISTANT_DIR} | advance_step._root_overlay_targets()
+    unclassified = sorted(
+        name
+        for name in top_level
+        if not advance_step._is_machinery_path(name) and name not in delivery
+    )
+
+    assert not unclassified, (
+        f"Unclassified top-level path(s): {unclassified}. Add each to "
+        "MACHINERY_PATHS in advance_step.py if it is workshop machinery/platform "
+        "scaffolding, or confirm it is participant delivery."
+    )

@@ -14,7 +14,7 @@
 ## What's already in the repo
 
 - Everything from Steps 1–7 in `travel_assistant/` — the specialists, tools, toolbox, RAG, and skill.
-- `travel_assistant/coordinator.py` — the Step 7 handoff graph. In this step you extract the specialist constructors into reusable factories so the workflow builds the **same** agents.
+- `travel_assistant/coordinator.py` — the Step 7 group chat. In this step you extract the specialist constructors into reusable factories so the workflow builds the **same** agents.
 - `travel_toolbox/toolbox.yaml` — unchanged.
 
 This step adds a `workflow.py`, refactors `coordinator.py` to expose factories, repoints `main.py`, and adds a `Workflows` tag. There are **no** new environment variables and no new Azure resources.
@@ -23,7 +23,7 @@ This step adds a `workflow.py`, refactors `coordinator.py` to expose factories, 
 
 Step 7 was **runtime collaboration**: the Coordinator decided, turn by turn, which specialist should answer next. That's the right shape when the path is user-driven and unknown in advance.
 
-A **workflow** is the opposite trade-off. You choose it when the process has a **known shape**, must survive restarts, or needs an explicit review before a costly action. Trip planning fits perfectly: gather preferences → ask each specialist → consolidate a draft → (optionally) get approval → finalize. The graph makes that process repeatable and inspectable, at the cost of the conversational flexibility handoff gave you.
+A **workflow** is the opposite trade-off. You choose it when the process has a **known shape**, must survive restarts, or needs an explicit review before a costly action. Trip planning fits perfectly: gather preferences → ask each specialist → consolidate a draft → (optionally) get approval → finalize. The graph makes that process repeatable and inspectable, at the cost of the conversational flexibility the group chat gave you.
 
 **The graph model.** A workflow is built from **executors** (nodes) connected by **edges**. Executors can be `AgentExecutor` (an agent wrapped as a node) or your own `Executor` subclasses with `@handler` methods. The engine runs in **supersteps**: every executor ready at the start of a superstep runs, their messages are delivered, and the next superstep begins. Fanning three edges out of one node runs those branches **concurrently**; fanning several edges into one node lets it aggregate.
 
@@ -59,7 +59,7 @@ The doubled `consolidate` node is where the checkpoint is written — the safe r
 
 ### 1. Extract the specialist factories
 
-Step 7 built the specialists inline inside `build_travel_coordinator()`. So the workflow can reuse the **same** agents, extract the construction into factories and a shared client helper. `build_travel_coordinator()` then calls them, so its behavior is unchanged.
+Step 7 built the specialists inline inside `build_travel_coordinator()`. Extract that construction into factories and a shared client helper, then delete `build_travel_coordinator()`: Step 8 replaces the Step 7 group chat with the durable **workflow**, which builds the **same** agents from these factories. The factories are now the single source of truth the workflow reads.
 
 As in Step 7, the `agents/*/agent.yaml` slices remain **documentation** — nothing loads them at runtime. The workflow imports these Python factories, so `coordinator.py` stays the single executable source of truth for what each specialist is and may touch.
 
@@ -77,7 +77,8 @@ def create_flights_agent(client, credential=None) -> Agent:
     credential = credential or DefaultAzureCredential()
     toolbox = FoundryToolbox(credential)
     return Agent(
-        client=client, name="FlightsSpecialist", instructions=FLIGHTS_INSTRUCTIONS,
+        client=client, name="FlightsSpecialist",
+        instructions=FLIGHTS_INSTRUCTIONS,
         tools=[get_weather, get_local_time, convert_currency, toolbox], default_options={"store": False},
     )
 
@@ -85,11 +86,11 @@ def create_flights_agent(client, credential=None) -> Agent:
 # create_activities_agent (toolbox web + RAG) follow the same pattern.
 ```
 
-The point is a **single source of truth**: the runtime Coordinator and the workflow now build identical specialists.
+The point is a **single source of truth**: the workflow builds every specialist from these factories.
 
 ### 2. Create `travel_assistant/workflow.py`
 
-The workflow has three custom executors plus agent nodes. `GatherPreferences` fans the request out to all three specialists; `Consolidate` aggregates their answers, checkpoints the draft, then sends the finalize prompt; `finalize_itinerary` is an `AgentExecutor` that writes the plan and — taking over the Step 7 Coordinator's role — owns the final deliverable, using the `travel-guide` skill to render the shareable PDF and the `response-guardrails` skill to check the answer.
+The workflow has three custom executors plus agent nodes. `GatherPreferences` fans the request out to all three specialists; `Consolidate` aggregates their answers, checkpoints the draft, then sends the finalize prompt; `finalize_itinerary` is an `AgentExecutor` that writes the plan and owns the final deliverable, using the `travel-guide` skill to render the shareable PDF and the `response-guardrails` skill to check the answer. This is the payoff over Step 7: there the group chat Coordinator was the manager: every round it returned a structured routing decision rather than a free, tool-driven answer, so a deliverable-shaping skill didn't belong on it — the skills had to ride on the Activities leaf and only guarded that leaf's output. A dedicated `finalize` node owns the deliverable outright and guards the actual final answer.
 
 ```python
 # travel_assistant/workflow.py

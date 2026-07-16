@@ -54,7 +54,8 @@ FINALIZE_INSTRUCTIONS = (
     "You write the final travel itinerary from an approved draft. Merge the flight, "
     "hotel, and activity sections into one concise, actionable plan. Do not invent "
     "bookings; clearly mark any assumptions.\n"
-    "You own the final deliverable and its safety, just like the Step 7 Coordinator:\n"
+    "You are the dedicated finalize node: you own the final deliverable "
+    "and its safety:\n"
     "- Always use the travel-guide skill to turn the plan into a downloadable, shareable PDF trip guide.\n"
     "- Always apply the response-guardrails skill to your answer before you return it."
 )

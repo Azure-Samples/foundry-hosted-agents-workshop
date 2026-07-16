@@ -281,6 +281,22 @@ python .workshop/scripts/advance_step.py --back --auto-commit
 
 Advancing has no built-in undo when you work locally without committing each step, so this is how you step back. It restores your saved work from `.workshop_instance/workshop_backups/step-<N>/` (the snapshot advance takes before leaving a step); if that snapshot is missing it rebuilds the canonical step files instead and warns you. Your current work is always backed up to `.workshop_instance/workshop_backups/back-<timestamp>/` first, and it errors at step 0.
 
+**Pull the latest workshop machinery (without advancing):**
+
+```bash
+python .workshop/scripts/sync_template.py --auto-commit   # add --push to push too
+```
+
+Occasionally the upstream template ships fixes to the workshop machinery (the authoring material under `.workshop/` and the GitHub configuration under `.github/`). This pulls those into your instance **without moving to the next step** and without touching your `travel_assistant/`, your `.workshop_instance/` state, `README.md`, or `.env`. The commit carries a `[skip-advance]` marker, so pushing it never advances you. A local run also refreshes `.github/workflows/`; the automated CI sync deliberately skips workflow files so it stays tokenless (no Personal Access Token required).
+
+**Reset the current step (re-lay its clean starter files):**
+
+```bash
+python .workshop/scripts/advance_step.py --reset-current --auto-commit
+```
+
+Re-lays the **current** step's clean starter files and re-renders its `README.md`, staying on the current step — unlike `--reset`, which returns you to step 0. Your previous `travel_assistant/` is backed up under `.workshop_instance/workshop_backups/reset-current-<step>-<timestamp>/` first. Pair it with a sync when you want the current step's delivery refreshed too: **sync first, then reset the current step**. (If you sync just before advancing, you don't need this — advancing already lays down fresh files.)
+
 **Re-run preflight:**
 
 ```bash
@@ -294,10 +310,12 @@ uv run python .workshop/scripts/preflight.py
 **Shortcuts (optional):** the repo ships a `Makefile` with these aliases:
 
 ```bash
-make advance     # advance to the next step (auto-commits workshop paths)
-make back        # move back one step (auto-commits workshop paths)
-make reset       # reset to step 0 (auto-commits workshop paths)
-make preflight   # run environment checks
+make advance        # advance to the next step (auto-commits workshop paths)
+make back           # move back one step (auto-commits workshop paths)
+make reset          # reset to step 0 (auto-commits workshop paths)
+make reset-current  # re-lay the current step's clean files (auto-commits)
+make preflight      # run environment checks
+make sync-template  # pull latest .workshop/ + .github/ from the template
 ```
 
 When `make` is not available (e.g. on a clean Windows install), just run the equivalent `python .workshop/scripts/...` commands above.
@@ -331,7 +349,7 @@ This workshop does not use marketplace actions for advancing steps; it uses the 
 
 ### "My push didn't advance the step"
 
-Auto-advance only runs for pushes to `main` in your own (non-template) repo, and it skips pushes that only changed workshop bookkeeping such as `.workshop_instance/.workshop-state.json`. Check the **Actions** tab for the **Advance workshop on push to main** run. If it was skipped, make sure you pushed a real change to `main` and that the previous advance already finished. If several quick pushes collapsed into a single advance, that's expected — each *landed* push advances one step.
+Auto-advance only runs for pushes to `main` in your own (non-template) repo, and it skips a few kinds of push that aren't step progress: pushes that only changed workshop bookkeeping such as `.workshop_instance/.workshop-state.json`, pushes whose commit carries a `[skip-advance]` marker (what a template sync adds), and pushes that changed **only** workshop machinery or platform files (`.github/`, `.workshop/`, `Makefile`, `.devcontainer/`, `README.md`, …) and never your delivery (`travel_assistant/` or its sibling folders like `travel_toolbox/`). That last case means you can pull the latest machinery from upstream and push it — even manually, without the `[skip-advance]` marker — without being bumped to the next step. Check the **Actions** tab for the **Advance workshop on push to main** run. If it was skipped, make sure your push touched a delivery file and that the previous advance already finished. If several quick pushes collapsed into a single advance, that's expected — each *landed* push advances one step.
 
 ### "Codespace can't reach my Foundry project"
 

@@ -1,0 +1,80 @@
+name: Reset current step
+
+# Re-lay the CURRENT step's clean starter files and re-render its README, without
+# moving to another step. This is the companion to "Sync template infra": sync
+# refreshes the workshop machinery (.workshop/ and .github/) while leaving your
+# step files and README untouched; this workflow then refreshes the delivery for
+# the step you are on. Your travel_assistant/ edits are backed up first, under
+# .workshop_instance/workshop_backups/reset-current-<step>-<timestamp>/.
+#
+# Unlike "Reset workshop", this keeps you on your current step instead of dropping
+# back to step 0.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type RESET to confirm. This overwrites travel_assistant/ for the current step — backups go to .workshop_instance/workshop_backups/reset-current-<step>-<timestamp>/."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  # Shared with init-workshop.yml, start-workshop.yml, reset-workshop.yml and
+  # advance-on-push.yml so every workflow that mutates the workshop state
+  # serializes on the same branch and never races another on `git push` or
+  # .workshop_instance/.workshop-state.json.
+  group: workshop-state-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  reset-current:
+    if: ${{ github.event.repository.is_template == false && github.event.inputs.confirm == 'RESET' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r .workshop/scripts/requirements.txt
+
+      - name: Reset current step
+        run: python .workshop/scripts/advance_step.py --reset-current
+
+      - name: Commit and push
+        shell: bash
+        # The commit carries "[skip-advance]" so advance-on-push.yml never treats
+        # this reset as a completed step and bumps to the next one. reset-current
+        # rewrites the state file to the SAME step (often a no-op diff), so the
+        # sentinel — not the state-file guard — is what keeps the step in place.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "workshop: reset current step [skip-advance]"
+          git push
+
+      - name: Summarize reset
+        shell: bash
+        run: |
+          echo "## ✅ Current step reset to its clean starter files" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Your previous travel_assistant/ is preserved under .workshop_instance/workshop_backups/reset-current-<step>-<timestamp>/." >> "$GITHUB_STEP_SUMMARY"
+
+  confirm-required:
+    if: ${{ github.event.repository.is_template == false && github.event.inputs.confirm != 'RESET' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize missing confirmation
+        shell: bash
+        run: |
+          echo "## ⚠️ Reset not confirmed. Re-run and type RESET in the confirm field." >> "$GITHUB_STEP_SUMMARY"
