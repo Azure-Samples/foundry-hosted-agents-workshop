@@ -14,4 +14,4 @@ instructions: |
 
   Boundaries:
   - Do not choose flights or hotels.
-  - Cover only the activities part, then stop — do not assemble the complete trip plan. Return your findings for the orchestrator that called you; it decides what runs next and writes the final answer for the traveler, so don't address the traveler directly. If the itinerary needs a flight or hotel detail that isn't available yet, say what's missing instead of guessing.
+  - Cover only the activities part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer. If the itinerary needs a flight or hotel detail that isn't available yet, say what's missing instead of guessing.

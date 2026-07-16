@@ -59,7 +59,7 @@ The doubled `consolidate` node is where the checkpoint is written — the safe r
 
 ### 1. Extract the specialist factories
 
-Step 7 built the specialists inline inside `build_travel_coordinator()`. Extract that construction into factories and a shared client helper so the workflow can reuse the **same** agents; `build_travel_coordinator()` then calls them, so its behavior is unchanged. Each specialist keeps its Step 7 `description=` — the group chat manager routed on it. The workflow wires its nodes explicitly and never reads descriptions, so they're inert here; keeping them leaves the extracted factories behavior-identical to Step 7 (harmless to carry).
+Step 7 built the specialists inline inside `build_travel_coordinator()`. Extract that construction into factories and a shared client helper, then delete `build_travel_coordinator()`: Step 8 replaces the Step 7 group chat with the durable **workflow**, which builds the **same** agents from these factories. The factories are now the single source of truth the workflow reads.
 
 As in Step 7, the `agents/*/agent.yaml` slices remain **documentation** — nothing loads them at runtime. The workflow imports these Python factories, so `coordinator.py` stays the single executable source of truth for what each specialist is and may touch.
 
@@ -78,7 +78,6 @@ def create_flights_agent(client, credential=None) -> Agent:
     toolbox = FoundryToolbox(credential)
     return Agent(
         client=client, name="FlightsSpecialist",
-        description="Handles flight timing, routing, airport, weather-risk, and currency questions.",
         instructions=FLIGHTS_INSTRUCTIONS,
         tools=[get_weather, get_local_time, convert_currency, toolbox], default_options={"store": False},
     )
@@ -87,7 +86,7 @@ def create_flights_agent(client, credential=None) -> Agent:
 # create_activities_agent (toolbox web + RAG) follow the same pattern.
 ```
 
-The point is a **single source of truth**: the runtime Coordinator and the workflow now build identical specialists.
+The point is a **single source of truth**: the workflow builds every specialist from these factories.
 
 ### 2. Create `travel_assistant/workflow.py`
 
