@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import posixpath
 import re
 import subprocess
 import sys
@@ -18,6 +19,11 @@ from typing import Sequence
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PARTIALS_DIR = REPO_ROOT / ".workshop" / "docs" / "partials"
 STEPS_DIR = REPO_ROOT / ".workshop" / "docs" / "steps"
+# The folders that source docs live in, as repo-root-relative POSIX paths. These
+# are the bases the link rebaser rewrites *from*. They are captured at import so
+# tests that monkeypatch ``STEPS_DIR`` to a scratch folder don't disturb them.
+STEPS_BASE = STEPS_DIR.relative_to(REPO_ROOT).as_posix()
+PARTIALS_BASE = PARTIALS_DIR.relative_to(REPO_ROOT).as_posix()
 TERMINAL_STEP = 9
 FINAL_STEP = 99
 
@@ -39,6 +45,81 @@ _STEP_MARKER_RE = re.compile(r"<!--\s*step:\s*(\d+)\s*-->", re.IGNORECASE)
 _REMOTE_RE = re.compile(r"github\.com[:/]([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 _PLACEHOLDER_OWNER = "{{OWNER}}"
 _PLACEHOLDER_REPO = "{{REPO}}"
+
+# Matches Markdown inline links and images: ``[text](url)`` and ``![alt](url)``.
+# The URL is captured up to whitespace or the closing paren; an optional
+# ``"title"`` after the URL is captured separately in ``tail`` and preserved.
+# Reference-style links, autolinks (``<https://...>``), and code spans are
+# intentionally not matched — none carry rebasable relative paths in our docs.
+_LINK_RE = re.compile(
+    r"(?P<label>!?\[[^\]]*\])"
+    r"\((?P<url>[^)\s]+)(?P<tail>(?:\s+\"[^\"]*\")?)\)"
+)
+
+# URLs that must never be rebased: an explicit scheme (``https:``, ``mailto:``…),
+# protocol-relative (``//host``), a pure anchor (``#section``), a root-absolute
+# path (``/foo``), or a handlebar placeholder URL (``{{...}}``).
+_NON_RELATIVE_URL_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9+.\-]*:|//|#|/|\{\{)")
+
+
+def is_rebasable_url(url: str) -> bool:
+    """Return ``True`` when ``url`` is a repo-relative link that should be rebased.
+
+    Absolute URLs, protocol-relative URLs, pure anchors, root-absolute paths, and
+    handlebar placeholder URLs are left untouched.
+    """
+
+    return _NON_RELATIVE_URL_RE.match(url) is None
+
+
+def resolve_relative_target(url: str, base_dir: str) -> str | None:
+    """Return the repo-root-relative path a relative link/image points at.
+
+    The ``url`` is interpreted as ``base_dir``-relative (how source docs author
+    their links) and the fragment (``#section``) is dropped. Returns ``None`` for
+    URLs that carry no repo-relative path to resolve — absolute URLs, pure
+    anchors, root-absolute paths, and placeholder URLs.
+    """
+
+    if not is_rebasable_url(url):
+        return None
+    path, _, _ = url.partition("#")
+    if not path:
+        return None
+    return posixpath.normpath(posixpath.join(base_dir, path))
+
+
+def _rebase_url(url: str, base_dir: str) -> str:
+    """Rewrite a single ``base_dir``-relative ``url`` to be repo-root-relative."""
+
+    if not is_rebasable_url(url):
+        return url
+    path, separator, fragment = url.partition("#")
+    if not path:
+        return url
+    trailing_slash = path.endswith("/")
+    rebased = posixpath.normpath(posixpath.join(base_dir, path))
+    if trailing_slash and not rebased.endswith("/"):
+        rebased += "/"
+    return f"{rebased}{separator}{fragment}"
+
+
+def rebase_relative_links(text: str, *, base_dir: str) -> str:
+    """Rewrite source-relative Markdown links/images to be repo-root-relative.
+
+    Source step docs and partials author their relative links/images relative to
+    the folder the source file lives in, so they resolve when the file is viewed
+    directly on GitHub. When those files are inlined into the root ``README.md``,
+    the same targets must resolve from the repo root instead. This rewrites each
+    relative link/image target from ``base_dir``-relative to repo-root-relative;
+    absolute URLs and pure anchors pass through unchanged.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        rebased = _rebase_url(match.group("url"), base_dir)
+        return f"{match.group('label')}({rebased}{match.group('tail')})"
+
+    return _LINK_RE.sub(_replace, text)
 
 
 def parse_step_marker(readme_text: str) -> int | None:
@@ -94,7 +175,8 @@ def _load_header(step: int, *, terminal_step: int = TERMINAL_STEP) -> str:
         "{{PROGRESS_BAR}}": _progress_bar(step, terminal_step=terminal_step),
         "{{WORKSHOP_MAP}}": _workshop_map(step, terminal_step=terminal_step),
     }
-    return _replace_placeholders(header, replacements)
+    header = _replace_placeholders(header, replacements)
+    return rebase_relative_links(header, base_dir=PARTIALS_BASE)
 
 
 def _load_footer(
@@ -122,7 +204,8 @@ def _load_footer(
         "{{NEXT_STEP_NUMBER}}": _format_step_number(next_step),
         "{{NEXT_STEP_TITLE}}": _step_title(next_step),
     }
-    return _replace_placeholders(footer, replacements)
+    footer = _replace_placeholders(footer, replacements)
+    return rebase_relative_links(footer, base_dir=PARTIALS_BASE)
 
 
 def _load_step_body(step: int, *, owner: str = "", repo: str = "") -> str:
@@ -152,7 +235,7 @@ def _load_step_body(step: int, *, owner: str = "", repo: str = "") -> str:
             "{{CURRENT_STEP}}": str(step),
         })
 
-    return body
+    return rebase_relative_links(body, base_dir=STEPS_BASE)
 
 
 def _progress_bar(step: int, *, terminal_step: int = TERMINAL_STEP) -> str:

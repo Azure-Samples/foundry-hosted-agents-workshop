@@ -579,7 +579,7 @@ You can also create both from the **Azure portal**. See the links under **Learn 
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/05-rag/`](.workshop/solutions/05-rag/)
+> If you get stuck: [`.workshop/solutions/05-rag/`](../../solutions/05-rag/)
 
 ## Upstream sample
 

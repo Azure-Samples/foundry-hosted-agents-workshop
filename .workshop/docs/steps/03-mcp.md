@@ -113,7 +113,7 @@ Then **keep your Step 2 instructions exactly as they are** and append one MCP se
         tools=tools,        # <-- the list you just extended above
 ```
 
-That's the whole code change. `client.get_mcp_tool(...)` reads the label and URL from the environment (the same values you just added to `.env`) and hands the agent a remote tool. Everything else in `main.py` — the `FoundryChatClient` setup, the three function tools, `default_options={"store": False}`, and `ResponsesHostServer(agent).run()` — is unchanged from Step 2. If you get stuck, the finished file is in [`.workshop/solutions/03-mcp/`](.workshop/solutions/03-mcp/).
+That's the whole code change. `client.get_mcp_tool(...)` reads the label and URL from the environment (the same values you just added to `.env`) and hands the agent a remote tool. Everything else in `main.py` — the `FoundryChatClient` setup, the three function tools, `default_options={"store": False}`, and `ResponsesHostServer(agent).run()` — is unchanged from Step 2. If you get stuck, the finished file is in [`.workshop/solutions/03-mcp/`](../../solutions/03-mcp/).
 
 > **Why `os.environ[...]` and not a hardcoded URL?** Reading the label and URL from the environment keeps them out of source control and lets you point at a different MCP server (or the authenticated variant in Troubleshooting) by editing `.env` — no code change. The hosted runtime gets the same values from the manifest at deploy time.
 
@@ -338,7 +338,7 @@ Make the prompt explicit: give an origin, a destination (IATA codes work well), 
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/03-mcp/`](.workshop/solutions/03-mcp/)
+> If you get stuck: [`.workshop/solutions/03-mcp/`](../../solutions/03-mcp/)
 
 ## Upstream sample
 

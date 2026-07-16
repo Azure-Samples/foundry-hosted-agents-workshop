@@ -305,7 +305,7 @@ If cleanup lists it as skipped, the name has no prefix match — delete it manua
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/09-memory/`](.workshop/solutions/09-memory/)
+> If you get stuck: [`.workshop/solutions/09-memory/`](../../solutions/09-memory/)
 
 ## Upstream sample
 

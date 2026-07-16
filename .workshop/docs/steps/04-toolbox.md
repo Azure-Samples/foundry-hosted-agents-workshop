@@ -151,7 +151,7 @@ TOOLBOX_ENDPOINT=https://<account>.services.ai.azure.com/api/projects/<project>/
 
 Once the toolbox is deployed, you can also see it in the **Foundry Toolkit** for VS Code: expand your project under **My Resources → Tools** and open the **Toolboxes** tab to view your toolbox along with its **Endpoint URL**.
 
-![Foundry Toolkit for VS Code showing the deployed toolbox under My Resources → Tools, with the Toolboxes tab listing the travel toolbox and its Endpoint URL](.workshop/docs/assets/04-toolbox-toolkit.png)
+![Foundry Toolkit for VS Code showing the deployed toolbox under My Resources → Tools, with the Toolboxes tab listing the travel toolbox and its Endpoint URL](../assets/04-toolbox-toolkit.png)
 
 ### 3. Swap the MCP tool for the toolbox in `travel_assistant/main.py`
 
@@ -221,7 +221,7 @@ and put the toolbox sentence in its place:
         ),
 ```
 
-That's the whole code change. Everything else — the `FoundryChatClient` setup, the three function tools, `default_options={"store": False}`, and the synchronous `ResponsesHostServer(agent).run()` — is unchanged from Step 3. If you get stuck, the finished file is in [`.workshop/solutions/04-toolbox/`](.workshop/solutions/04-toolbox/).
+That's the whole code change. Everything else — the `FoundryChatClient` setup, the three function tools, `default_options={"store": False}`, and the synchronous `ResponsesHostServer(agent).run()` — is unchanged from Step 3. If you get stuck, the finished file is in [`.workshop/solutions/04-toolbox/`](../../solutions/04-toolbox/).
 
 > **Why one `credential`?** The toolbox and the chat client both authenticate to Foundry. Sharing a single `DefaultAzureCredential()` avoids two sign-in flows and keeps token caching in one place.
 
@@ -461,7 +461,7 @@ The final `tools` list should contain **four** entries: the three function tools
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/04-toolbox/`](.workshop/solutions/04-toolbox/)
+> If you get stuck: [`.workshop/solutions/04-toolbox/`](../../solutions/04-toolbox/)
 
 ## Upstream sample
 

@@ -191,7 +191,7 @@ Then update the `Agent(...)` call. **Keep your Step 1 instructions exactly as th
     )
 ```
 
-That's the whole change: the `from tools import ...` line and the `tools=[...]` argument do the wiring; the appended instructions just tell the model when to reach for the tools. Everything else in `main.py` is unchanged from Step 1. If you get stuck, the finished file is in [`.workshop/solutions/02-tools/`](.workshop/solutions/02-tools/).
+That's the whole change: the `from tools import ...` line and the `tools=[...]` argument do the wiring; the appended instructions just tell the model when to reach for the tools. Everything else in `main.py` is unchanged from Step 1. If you get stuck, the finished file is in [`.workshop/solutions/02-tools/`](../../solutions/02-tools/).
 
 ### 3. Update the metadata in `travel_assistant/agent.manifest.yaml`
 
@@ -346,7 +346,7 @@ For the comparison prompt, the model may call `get_weather` once per city.
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/02-tools/`](.workshop/solutions/02-tools/)
+> If you get stuck: [`.workshop/solutions/02-tools/`](../../solutions/02-tools/)
 
 ## Upstream sample
 
