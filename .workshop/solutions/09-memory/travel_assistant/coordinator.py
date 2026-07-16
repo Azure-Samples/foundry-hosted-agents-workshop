@@ -292,6 +292,9 @@ def make_client(credential=None) -> FoundryChatClient:
 # --- Specialist factories -------------------------------------------------
 # Extracted in Step 8 so the runtime Coordinator (this file) and the durable
 # workflow (workflow.py) build the *same* specialists from one source of truth.
+# Each keeps its Step 7 `description=`: the reference group chat routes on it,
+# while the workflow ignores it (its node edges are explicit) — kept so the
+# extracted factories stay behavior-identical to Step 7.
 
 
 def create_flights_agent(client: FoundryChatClient, credential=None) -> Agent:
@@ -302,6 +305,7 @@ def create_flights_agent(client: FoundryChatClient, credential=None) -> Agent:
     return Agent(
         client=client,
         name="FlightsSpecialist",
+        description="Handles flight timing, routing, airport, weather-risk, and currency questions.",
         instructions=FLIGHTS_INSTRUCTIONS,
         tools=[get_weather, get_local_time, convert_currency, toolbox],
         context_providers=[memory],
@@ -318,6 +322,7 @@ def create_hotels_agent(client: FoundryChatClient, credential=None) -> Agent:
     return Agent(
         client=client,
         name="HotelsSpecialist",
+        description="Handles hotel area, budget, amenity, and lodging trade-off questions.",
         instructions=HOTELS_INSTRUCTIONS,
         tools=[convert_currency, toolbox],
         context_providers=[search, memory],
@@ -334,6 +339,7 @@ def create_activities_agent(client: FoundryChatClient, credential=None) -> Agent
     return Agent(
         client=client,
         name="ActivitiesSpecialist",
+        description="Handles experiences, day trips, local guidance, and itinerary-building questions.",
         instructions=ACTIVITIES_INSTRUCTIONS,
         tools=[toolbox],
         context_providers=[search, memory],

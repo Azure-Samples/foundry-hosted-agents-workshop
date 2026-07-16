@@ -271,6 +271,13 @@ def make_client(credential=None) -> FoundryChatClient:
 # workflow (workflow.py) build the *same* specialists from one source of truth.
 
 
+# --- Specialist factories -------------------------------------------------
+# One source of truth for both the workflow (workflow.py) and the reference
+# Coordinator below. Each specialist keeps its Step 7 `description=`: the group
+# chat manager routes on it, while the workflow ignores it (its node edges are
+# explicit) — kept so the extracted factories stay behavior-identical to Step 7.
+
+
 def create_flights_agent(client: FoundryChatClient, credential=None) -> Agent:
     """Flights: weather + local time + currency, plus the toolbox (OctoTrip MCP is flight search)."""
     credential = credential or DefaultAzureCredential()
@@ -278,6 +285,7 @@ def create_flights_agent(client: FoundryChatClient, credential=None) -> Agent:
     return Agent(
         client=client,
         name="FlightsSpecialist",
+        description="Handles flight timing, routing, airport, weather-risk, and currency questions.",
         instructions=FLIGHTS_INSTRUCTIONS,
         tools=[get_weather, get_local_time, convert_currency, toolbox],
         default_options={"store": False},
@@ -292,6 +300,7 @@ def create_hotels_agent(client: FoundryChatClient, credential=None) -> Agent:
     return Agent(
         client=client,
         name="HotelsSpecialist",
+        description="Handles hotel area, budget, amenity, and lodging trade-off questions.",
         instructions=HOTELS_INSTRUCTIONS,
         tools=[convert_currency, toolbox],
         context_providers=[search],
@@ -307,6 +316,7 @@ def create_activities_agent(client: FoundryChatClient, credential=None) -> Agent
     return Agent(
         client=client,
         name="ActivitiesSpecialist",
+        description="Handles experiences, day trips, local guidance, and itinerary-building questions.",
         instructions=ACTIVITIES_INSTRUCTIONS,
         tools=[toolbox],
         context_providers=[search],
