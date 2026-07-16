@@ -16,4 +16,4 @@ instructions: |
 
   Boundaries:
   - Do not choose hotels or activities.
-  - Cover only the flight part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly. If a detail you need is missing, say what's missing instead of guessing.
+  - Cover only the flight part, then stop — do not assemble the complete trip plan. Return your findings for the orchestrator that called you; it decides what runs next and writes the final answer for the traveler, so don't address the traveler directly. If a detail you need is missing, say what's missing instead of guessing.

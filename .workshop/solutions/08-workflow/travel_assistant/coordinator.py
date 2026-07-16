@@ -68,7 +68,7 @@ Tools (always use these rather than answering from memory):
 
 Boundaries:
 - Do not choose hotels or activities.
-- Cover only the flight part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly. If a detail you need is missing, say what's missing instead of guessing."""
+- Cover only the flight part, then stop — do not assemble the complete trip plan. Return your findings for the orchestrator that called you; it decides what runs next and writes the final answer for the traveler, so don't address the traveler directly. If a detail you need is missing, say what's missing instead of guessing."""
 
 HOTELS_INSTRUCTIONS = """You are the Hotels specialist for TravelBuddy.
 
@@ -84,7 +84,7 @@ Tools (always use these rather than answering from memory):
 Boundaries:
 - Do not invent live availability.
 - Do not plan full-day activities unless they affect neighbourhood choice.
-- Cover only the lodging part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly. If a detail you need is missing, say what's missing instead of guessing."""
+- Cover only the lodging part, then stop — do not assemble the complete trip plan. Return your findings for the orchestrator that called you; it decides what runs next and writes the final answer for the traveler, so don't address the traveler directly. If a detail you need is missing, say what's missing instead of guessing."""
 
 ACTIVITIES_INSTRUCTIONS = """You are the Activities specialist for TravelBuddy.
 
@@ -97,7 +97,7 @@ Tools (always use these rather than answering from memory):
 
 Boundaries:
 - Do not choose flights or hotels.
-- Cover only the activities part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly. If the itinerary needs a flight or hotel detail that isn't in the conversation yet, say what's missing instead of guessing."""
+- Cover only the activities part, then stop — do not assemble the complete trip plan. Return your findings for the orchestrator that called you; it decides what runs next and writes the final answer for the traveler, so don't address the traveler directly. If the itinerary needs a flight or hotel detail that isn't available yet, say what's missing instead of guessing."""
 
 
 def run_local_skill_script(
