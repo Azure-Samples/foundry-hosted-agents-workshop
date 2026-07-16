@@ -251,11 +251,6 @@ def make_client(credential=None) -> FoundryChatClient:
 
 
 # --- Specialist factories -------------------------------------------------
-# Extracted in Step 8 so the runtime Coordinator (this file) and the durable
-# workflow (workflow.py) build the *same* specialists from one source of truth.
-
-
-# --- Specialist factories -------------------------------------------------
 # One source of truth: the workflow (workflow.py) builds its agent nodes from
 # these factories.
 

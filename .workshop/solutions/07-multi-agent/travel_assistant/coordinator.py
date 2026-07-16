@@ -37,10 +37,10 @@ logger = logging.getLogger(__name__)
 
 # The Coordinator is the group chat MANAGER (the GroupChatBuilder orchestrator): each
 # round it reads the conversation and returns a STRUCTURED routing decision
-# (which specialist speaks next, or terminate with the final answer). Because it runs
-# with a fixed response_format, it can't also carry tools or a tool-producing context
-# provider (the skills provider) — so, unlike Steps 1-6, this Coordinator has no tools
-# and no context providers.
+# (which specialist speaks next, or terminate with the final answer). The framework
+# doesn't strip a manager's tools, but a skill it carried wouldn't reliably fire —
+# its turn produces that routing decision, not a free tool-driven answer — so, unlike
+# Steps 1-6, this Coordinator deliberately has no tools and no context providers.
 # The final deliverable — the travel-guide PDF and the response-guardrails check —
 # therefore rides on the Activities specialist (a group chat participant that owns the
 # skills provider). The manager selects Activities last and relays its guarded guide as
@@ -284,8 +284,8 @@ def build_travel_coordinator() -> Agent:
     # Carried capabilities from Steps 4-6, wired per agent below. The skills provider
     # (LOCAL travel-guide + the FOUNDRY response-guardrails skill downloaded at
     # startup, see _build_skills_provider) rides on the Activities participant —
-    # the group chat manager (Coordinator) can't carry a context provider because it
-    # returns a structured routing decision (see COORDINATOR_INSTRUCTIONS).
+    # a skill on the group chat manager (Coordinator) wouldn't reliably fire, since its
+    # turn returns a structured routing decision (see COORDINATOR_INSTRUCTIONS).
     toolbox = FoundryToolbox(credential)
     search = _build_search_provider(credential)
     skills = _build_skills_provider()

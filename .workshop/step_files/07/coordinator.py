@@ -47,10 +47,9 @@ load_dotenv(override=True)
 # guardrail its answer; if you skipped it (no public-network Foundry project), serve
 # only the local skill and drop the response-guardrails line from ACTIVITIES_INSTRUCTIONS.
 # Why Activities and not the Coordinator? The Coordinator is the group chat MANAGER: it
-# returns a structured next-speaker/terminate decision each round, so it can't also
-# carry tools or a tool-producing context provider. The skills therefore ride on the
-# Activities participant. Step 8's workflow adds a dedicated finalize node that CAN own
-# the deliverable.
+# returns a structured next-speaker/terminate decision each round, so a skill it carried
+# wouldn't reliably fire. The skills therefore ride on the Activities participant.
+# Step 8's workflow adds a dedicated finalize node that owns the deliverable outright.
 
 
 # --- Instruction constants --------------------------------------------------
@@ -103,7 +102,7 @@ def build_travel_coordinator() -> Agent:
     # TODO: build the skills provider from your Step 6 code (local travel-guide,
     # plus the Foundry response-guardrails skill only if you built it in Step 6).
     # It belongs to the Activities specialist below — that participant owns the final
-    # PDF guide + guardrails (the manager Coordinator can't carry a context provider).
+    # PDF guide + guardrails (a skill on the manager Coordinator wouldn't reliably fire).
     # skills = ...
 
     # Carry default_options={"store": False} over from every earlier step: the hosting
