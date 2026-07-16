@@ -1,4 +1,4 @@
-"""Sync workshop infrastructure from the upstream template into this instance.
+"""Sync workshop machinery from the upstream template into this instance.
 
 A workshop *instance* (a repo created from the template) sometimes needs the
 latest workshop machinery — the authoring material under ``.workshop/`` and the
@@ -82,7 +82,7 @@ PROTECTED_PATHS = frozenset(
 # moves the workshop to the next step. Keep it in sync with the check in
 # .github/workflows/advance-on-push.yml.
 SKIP_ADVANCE_SENTINEL = "[skip-advance]"
-COMMIT_MESSAGE = f"workshop: sync template infra from upstream {SKIP_ADVANCE_SENTINEL}"
+COMMIT_MESSAGE = f"workshop: sync machinery from upstream {SKIP_ADVANCE_SENTINEL}"
 
 # The workflow that enforces the "sync must not advance" contract. Before we
 # adopt a new .github/ tree we verify the upstream copy of this file still honors

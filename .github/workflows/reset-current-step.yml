@@ -1,7 +1,7 @@
 name: Reset current step
 
 # Re-lay the CURRENT step's clean starter files and re-render its README, without
-# moving to another step. This is the companion to "Sync template infra": sync
+# moving to another step. This is the companion to "Sync workshop machinery": sync
 # refreshes the workshop machinery (.workshop/ and .github/) while leaving your
 # step files and README untouched; this workflow then refreshes the delivery for
 # the step you are on. Your travel_assistant/ edits are backed up first, under

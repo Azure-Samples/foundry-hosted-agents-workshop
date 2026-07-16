@@ -1,4 +1,4 @@
-name: Sync template infra
+name: Sync workshop machinery
 
 # Pull the latest workshop machinery (.workshop/ and .github/) from the upstream
 # template into this instance WITHOUT advancing the current step. Participant work
@@ -124,7 +124,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # The [skip-advance] sentinel keeps advance-on-push.yml from advancing.
           # Keep it in sync with SKIP_ADVANCE_SENTINEL in sync_template.py.
-          git commit -q -m "workshop: sync template infra from upstream [skip-advance]"
+          git commit -q -m "workshop: sync machinery from upstream [skip-advance]"
           git push
 
       - name: Summarize
@@ -142,7 +142,7 @@ jobs:
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "Re-run with **Dry run = false** to apply the changes above." >> "$GITHUB_STEP_SUMMARY"
           elif [[ "$CHANGED" == "true" ]]; then
-            echo "## ✅ Template infra synced" >> "$GITHUB_STEP_SUMMARY"
+            echo "## ✅ Workshop machinery synced" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "Pulled the latest \`.workshop/\` and \`.github/\` (excluding \`.github/workflows/\`) from \`${UPSTREAM_REF}\` of \`${UPSTREAM_URL}\`." >> "$GITHUB_STEP_SUMMARY"
             echo "Your current step was preserved. Run \`git pull\` locally to refresh." >> "$GITHUB_STEP_SUMMARY"
