@@ -2,7 +2,7 @@
 agent-framework-foundry
 agent-framework-foundry-hosting>=1.0.0a260630
 
-# ---- Multi-agent orchestration (HandoffBuilder) ----
+# ---- Multi-agent orchestration (GroupChatBuilder) ----
 agent-framework-orchestrations
 
 # ---- Local Debugging in Foundry Toolkit ----

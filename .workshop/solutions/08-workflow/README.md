@@ -4,12 +4,12 @@
 
 # Solution 08 — TravelBuddy as a durable workflow
 
-Builds on Step 7: the same Flights / Hotels / Activities specialists are reused as **workflow nodes** instead of runtime handoff targets. A `gather_preferences` step fans the request out to all three specialists, a `consolidate` step aggregates their answers and **checkpoints** the draft, and a `finalize_itinerary` step produces the plan. The graph is exposed as one hosted agent via `workflow.as_agent()`, so hosting and deployment are unchanged (`resources: []`, no `azd provision`).
+Builds on Step 7: the same Flights / Hotels / Activities specialists are reused as **workflow nodes** instead of runtime group chat participants. A `gather_preferences` step fans the request out to all three specialists, a `consolidate` step aggregates their answers and **checkpoints** the draft, and a `finalize_itinerary` step produces the plan. The graph is exposed as one hosted agent via `workflow.as_agent()`, so hosting and deployment are unchanged (`resources: []`, no `azd provision`).
 
 ## Layout
 
 - `travel_assistant/` — the agent code.
-  - `coordinator.py` — Step 7 handoff **plus** the extracted specialist factories (`create_flights_agent`, `create_hotels_agent`, `create_activities_agent`, `make_client`) that both the coordinator and the workflow now share.
+  - `coordinator.py` — the extracted specialist factories (`create_flights_agent`, `create_hotels_agent`, `create_activities_agent`) plus the shared `make_client` / `_build_skills_provider` helpers that the workflow builds its agent nodes from.
   - `workflow.py` — the executors (`GatherPreferences`, `Consolidate`, `ApprovalGate`), the `WorkflowBuilder` graph, checkpointing, and `build_workflow_agent()`.
   - `coordinator.py`'s `_build_skills_provider` downloads the required Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider`; `workflow.py` attaches it to the `finalize_itinerary` step.
   - `main.py` — hosts `build_workflow_agent()`.

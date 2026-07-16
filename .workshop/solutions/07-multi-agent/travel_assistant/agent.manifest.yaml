@@ -9,8 +9,9 @@
 name: travel-buddy
 description: >
   TravelBuddy is an Agent Framework hosted agent exposed as a runtime multi-agent
-  handoff: a Coordinator routes each turn to Flights, Hotels, or Activities
-  specialists. The specialists share the carried capabilities — function tools, the
+  group chat: a Coordinator (the manager) picks which of the Flights, Hotels, or
+  Activities specialists speaks next each round, then synthesizes the final answer.
+  The specialists share the carried capabilities — function tools, the
   Foundry Toolbox (web search, Code Interpreter, OctoTrip flights), destination RAG
   in Azure AI Search, the local travel-guide Skill, and a required Foundry
   response-guardrails Skill (downloaded from the project and shareable across agents) — sliced
@@ -56,8 +57,8 @@ metadata:
         the Activities specialist; shareable across agents and required by this step.
         Uploaded out-of-band via foundry_skills/provision_skills.py.
       type: skill
-  handoff:
-    coordinator: Coordinator
+  group_chat:
+    manager: Coordinator
     specialists: [FlightsSpecialist, HotelsSpecialist, ActivitiesSpecialist]
 template:
   name: travel-buddy
