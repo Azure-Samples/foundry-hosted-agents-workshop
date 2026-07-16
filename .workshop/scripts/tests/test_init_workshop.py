@@ -1,8 +1,9 @@
 """Tests for ``scripts/init_workshop.py``.
 
 The init script is invoked from two GitHub Actions workflows, so the tests pin
-its three contract guarantees: it renders + substitutes correctly when missing
-the marker, it creates the marker, and it no-ops once the marker exists.
+its three contract guarantees: it renders the README (leaving ``.workshop/docs``
+sources untouched as placeholders) when missing the marker, it creates the
+marker, and it no-ops once the marker exists.
 """
 
 from __future__ import annotations
@@ -94,13 +95,16 @@ def test_initialize_renders_readme_with_real_owner_and_repo(workshop_repo):
     assert "{{REPO}}" not in readme
 
 
-def test_initialize_substitutes_placeholders_in_nested_docs(workshop_repo):
+def test_initialize_leaves_doc_sources_as_placeholders(workshop_repo):
+    # init must NOT bake owner/repo into .workshop/docs/** sources. The renderer
+    # substitutes {{OWNER}}/{{REPO}} at render time, so the sources stay as
+    # placeholders and remain identical to the upstream template — which is what
+    # keeps sync_template.py from reverting them on every sync.
     init_workshop.initialize(owner="octo", repo="demo")
 
     nested = (workshop_repo / ".workshop" / "docs" / "steps" / "00-synthetic.md").read_text(encoding="utf-8")
-    assert "octo/demo" in nested
-    assert "{{OWNER}}" not in nested
-    assert "{{REPO}}" not in nested
+    assert "{{OWNER}}/{{REPO}}" in nested
+    assert "octo/demo" not in nested
 
 
 def test_initialize_creates_marker_file(workshop_repo):
