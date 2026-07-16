@@ -70,7 +70,7 @@ jobs:
         if: steps.init-check.outputs.initialized != 'true'
         run: python .workshop/scripts/advance_step.py --init
 
-      - name: Initialize workshop (render README, substitute placeholders, create marker)
+      - name: Initialize workshop (render README, create marker)
         if: steps.init-check.outputs.initialized != 'true'
         run: |
           python .workshop/scripts/init_workshop.py \

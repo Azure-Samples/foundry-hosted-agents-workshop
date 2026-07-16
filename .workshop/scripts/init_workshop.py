@@ -7,8 +7,11 @@ idempotent so duplicate or accidental runs are safe: a marker file under
 
 Responsibilities:
 - Render ``README.md`` for the current workshop step with the real owner/repo.
-- Substitute literal ``{{OWNER}}`` / ``{{REPO}}`` placeholders in ``README.md``
-  and every ``docs/**/*.md`` file (covers anything the renderer doesn't emit).
+  The renderer substitutes ``{{OWNER}}`` / ``{{REPO}}`` at render time, so the
+  ``.workshop/docs/**`` sources keep their placeholders and stay byte-identical
+  to the upstream template. That is what lets ``sync_template.py`` refresh the
+  docs from upstream without reverting instance-specific values (baking the real
+  owner/repo into the sources here would make every sync show a spurious diff).
 - Create ``.workshop_instance/.workshop-initialized`` so future runs are no-ops.
 """
 
@@ -26,7 +29,6 @@ from render_readme import render
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATE_FILE = ".workshop_instance/.workshop-state.json"
 README_FILE = "README.md"
-DOCS_DIR = ".workshop/docs"
 MARKER_FILE = ".workshop_instance/.workshop-initialized"
 _PLACEHOLDER_OWNER = "{{OWNER}}"
 _PLACEHOLDER_REPO = "{{REPO}}"
@@ -76,44 +78,6 @@ def _load_current_step() -> int:
     if not isinstance(current_step, int):
         raise InitError(f"Malformed {STATE_FILE}: current_step must be an integer.")
     return current_step
-
-
-def _substitute_placeholders(text: str, owner: str, repo: str) -> str:
-    """Replace literal owner/repo placeholders in ``text``."""
-
-    return text.replace(_PLACEHOLDER_OWNER, owner).replace(_PLACEHOLDER_REPO, repo)
-
-
-def _files_to_substitute() -> list[Path]:
-    """Collect markdown files whose placeholders should be substituted."""
-
-    targets: list[Path] = []
-    readme = _path(README_FILE)
-    if readme.exists():
-        targets.append(readme)
-    docs_dir = _path(DOCS_DIR)
-    if docs_dir.exists():
-        targets.extend(sorted(docs_dir.rglob("*.md")))
-    return targets
-
-
-def _substitute_files(owner: str, repo: str) -> list[Path]:
-    """Rewrite placeholder occurrences in every markdown file. Returns changed paths."""
-
-    changed: list[Path] = []
-    for path in _files_to_substitute():
-        try:
-            original = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise InitError(f"Failed to read {path}: {exc}") from exc
-        replaced = _substitute_placeholders(original, owner, repo)
-        if replaced != original:
-            try:
-                path.write_text(replaced, encoding="utf-8")
-            except OSError as exc:
-                raise InitError(f"Failed to write {path}: {exc}") from exc
-            changed.append(path)
-    return changed
 
 
 def _render_readme(step: int, *, owner: str, repo: str) -> None:
@@ -169,16 +133,14 @@ def initialize(*, owner: str, repo: str, dry_run: bool = False) -> int:
     if dry_run:
         print(f"DRY RUN: would initialize workshop for {owner}/{repo} at step {current_step}")
         print(f"Would render {README_FILE} for step {current_step}.")
-        print(f"Would substitute placeholders in {README_FILE} and {DOCS_DIR}/**/*.md.")
         print(f"Would create marker {MARKER_FILE}.")
         return 0
 
     _render_readme(current_step, owner=owner, repo=repo)
-    changed = _substitute_files(owner, repo)
     _create_marker()
     print(
         f"Initialized workshop for {owner}/{repo} at step {current_step} "
-        f"(substituted placeholders in {len(changed)} file(s); created {MARKER_FILE})."
+        f"(rendered {README_FILE}; created {MARKER_FILE})."
     )
     return 0
 
