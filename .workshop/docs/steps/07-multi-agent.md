@@ -138,7 +138,18 @@ Metadata-only: append the `Multi-Agent` tag to your existing `tags` (if you kept
 ```yaml
 # travel_assistant/agent.manifest.yaml (delta)
 metadata:
-  tags: [Agent Framework, AI Agent Hosting, Azure AI AgentServer, Responses Protocol, Travel Assistant, Function Tools, MCP Tools, Toolbox Tools, RAG, Skills, Multi-Agent]
+  tags:
+    - Agent Framework
+    - AI Agent Hosting
+    - Azure AI AgentServer
+    - Responses Protocol
+    - Travel Assistant
+    - Function Tools
+    - MCP Tools
+    - Toolbox Tools
+    - RAG
+    - Skills
+    - Multi-Agent
   group_chat:
     manager: Coordinator
     specialists: [FlightsSpecialist, HotelsSpecialist, ActivitiesSpecialist]

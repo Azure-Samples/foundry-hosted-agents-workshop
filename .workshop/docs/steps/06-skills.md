@@ -265,7 +265,17 @@ Add the local skill to the manifest metadata: a `travel-guide` entry under `tool
 ```yaml
 # travel_assistant/agent.manifest.yaml (delta)
 metadata:
-  tags: [Agent Framework, AI Agent Hosting, Azure AI AgentServer, Responses Protocol, Travel Assistant, Function Tools, MCP Tools, Toolbox Tools, RAG, Skills]
+  tags:
+    - Agent Framework
+    - AI Agent Hosting
+    - Azure AI AgentServer
+    - Responses Protocol
+    - Travel Assistant
+    - Function Tools
+    - MCP Tools
+    - Toolbox Tools
+    - RAG
+    - Skills
   tool_declarations:
     # ... the Step 5 declarations stay ...
     - name: travel-guide
@@ -273,6 +283,7 @@ metadata:
         Local Skill that renders a grounded, downloadable PDF travel guide (with a
         day-by-day itinerary) via scripts/create_travel_guide.py.
       type: skill
+# ... the template block (name, kind, protocols, environment_variables) stays ...
 resources: []
 ```
 
@@ -533,7 +544,18 @@ In the manifest, append the `Foundry Skills` tag, add a `response-guardrails` `t
 ```yaml
 # travel_assistant/agent.manifest.yaml (delta)
 metadata:
-  tags: [Agent Framework, AI Agent Hosting, Azure AI AgentServer, Responses Protocol, Travel Assistant, Function Tools, MCP Tools, Toolbox Tools, RAG, Skills, Foundry Skills]
+  tags:
+    - Agent Framework
+    - AI Agent Hosting
+    - Azure AI AgentServer
+    - Responses Protocol
+    - Travel Assistant
+    - Function Tools
+    - MCP Tools
+    - Toolbox Tools
+    - RAG
+    - Skills
+    - Foundry Skills
   tool_declarations:
     # ... the Step 5 declarations + local `travel-guide` skill stay ...
     - name: response-guardrails

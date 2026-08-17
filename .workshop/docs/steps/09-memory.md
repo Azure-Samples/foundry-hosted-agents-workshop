@@ -172,7 +172,20 @@ In `agent.manifest.yaml`, append the `Memory` tag, add a memory `tool_declaratio
 ```yaml
 # travel_assistant/agent.manifest.yaml (delta)
 metadata:
-  tags: [Agent Framework, AI Agent Hosting, Azure AI AgentServer, Responses Protocol, Travel Assistant, Function Tools, MCP Tools, Toolbox Tools, RAG, Skills, Multi-Agent, Workflows, Memory]
+  tags:
+    - Agent Framework
+    - AI Agent Hosting
+    - Azure AI AgentServer
+    - Responses Protocol
+    - Travel Assistant
+    - Function Tools
+    - MCP Tools
+    - Toolbox Tools
+    - RAG
+    - Skills
+    - Multi-Agent
+    - Workflows
+    - Memory
   tool_declarations:
     - name: travelbuddy_memory
       description: Durable, per-user memory backed by a Foundry Memory Store, scoped via {{$userId}}.
