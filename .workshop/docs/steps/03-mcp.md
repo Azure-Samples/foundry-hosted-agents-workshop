@@ -312,22 +312,29 @@ The quick way, and the usual inner-loop pattern — keep the server local, tunne
 
 ```bash
 devtunnel user login
-devtunnel create octotrip-mock --allow-anonymous
-devtunnel port create octotrip-mock --port-number 8931
-devtunnel host octotrip-mock
+devtunnel host --port-number 8931 --allow-anonymous
 ```
 
-`--allow-anonymous` is required — Foundry sends no tunnel token, and a protected tunnel just answers 401. `devtunnel host` prints the public URL; keep it running while you work, and re-run it to get the same URL back. In a Codespace, forwarding port 8931 as **Public** does the same job.
+`--allow-anonymous` is required — Foundry sends no tunnel token, and a protected tunnel just answers 401. Don't name the tunnel: `devtunnel create <id>` needs a **globally unique** ID, so a shared name fails for everyone after the first person. `devtunnel host` prints the public URL; keep it running while you work. In a Codespace, forwarding port 8931 as **Public** does the same job.
 
-For something that outlives your terminal, deploy it: the same folder is an Azure Functions app with anonymous access, and its [README](.workshop/mocks/octotrip_flights_mcp/README.md) has the `az` commands and the key fallback if your Functions host is too old to honour `Anonymous`.
+For something that outlives your terminal, deploy it: the same folder is an Azure Functions app with anonymous access, and its [README](.workshop/mocks/octotrip_flights_mcp/README.md) has the `az` commands.
 
-Either way, swap the two settings in `.env` **and** the manifest:
+Either way, append `/mcp` to the URL and set it in all three places — `.env`, the azd environment, and the manifest:
 
 ```env
 # .env
 MCP_SERVER_LABEL=octotrip_flights_mock
-MCP_SERVER_URL=https://<tunnel-id>-8931.<region>.devtunnels.ms/mcp
+MCP_SERVER_URL=https://<generated-id>-8931.<region>.devtunnels.ms/mcp
 ```
+
+<!-- terminal -->
+```bash
+cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+azd env set MCP_SERVER_LABEL "$MCP_SERVER_LABEL"
+azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
+```
+
+Skipping the `azd env set` pair is the usual reason the agent keeps calling the real server: `azd` reads its own environment, not the repo's `.env`. Restart `azd ai agent run` afterwards. A temporary tunnel gets a new URL each time you host it, so redo those two commands whenever you restart it.
 
 Switch back to `https://mcp.octotrip.app/flights/mcp` once the real server answers again.
 

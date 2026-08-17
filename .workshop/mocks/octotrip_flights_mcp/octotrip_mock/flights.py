@@ -104,6 +104,13 @@ DATE_FORMATS: tuple[str, ...] = (
 # Above this great-circle distance the mock stops offering non-stop options.
 MAX_NONSTOP_KM = 13_500.0
 
+# Below this one, nobody would connect: short hops are non-stop or nothing.
+MIN_CONNECTION_KM = 600.0
+
+# Airlines load schedules about a year out; this also keeps next-day arrival
+# arithmetic clear of date.max.
+MAX_BOOKING_HORIZON_DAYS = 400
+
 MOCK_NOTICE = (
     "Synthetic data from the OctoTrip Flights mock MCP server. Flights, prices, "
     "airlines, and booking links are generated from the request and are not real."
@@ -163,6 +170,13 @@ def _as_int(value: Any, field: str, minimum: int, maximum: int, default: int) ->
             message=f"'{field}' must be a whole number, got {value!r}.",
             suggestion=f"Pass an integer between {minimum} and {maximum}.",
         ) from exc
+    # int() truncates, so 1.9 would quietly become one passenger.
+    if parsed != value and not isinstance(value, str):
+        raise MockToolError(
+            code="invalid_request",
+            message=f"'{field}' must be a whole number, got {value!r}.",
+            suggestion=f"Pass an integer between {minimum} and {maximum}.",
+        )
     if not minimum <= parsed <= maximum:
         raise MockToolError(
             code="invalid_request",
@@ -224,6 +238,15 @@ def _normalize(arguments: dict[str, Any], today: date) -> SearchQuery:
             message=f"departure_date {departure_date.isoformat()} is in the past.",
             suggestion=f"Search a date on or after {today.isoformat()}.",
         )
+    # Real airlines don't sell this far out either, and it keeps date arithmetic
+    # for next-day arrivals well clear of date.max.
+    latest = today + timedelta(days=MAX_BOOKING_HORIZON_DAYS)
+    if departure_date > latest:
+        raise MockToolError(
+            code="invalid_date",
+            message=f"departure_date {departure_date.isoformat()} is too far ahead.",
+            suggestion=f"Schedules only go out to {latest.isoformat()}.",
+        )
 
     return_date: date | None = None
     if arguments.get("return_date"):
@@ -233,6 +256,12 @@ def _normalize(arguments: dict[str, Any], today: date) -> SearchQuery:
                 code="invalid_date",
                 message="return_date is before departure_date.",
                 suggestion="Set return_date on or after departure_date, or omit it for a one-way search.",
+            )
+        if return_date > latest:
+            raise MockToolError(
+                code="invalid_date",
+                message=f"return_date {return_date.isoformat()} is too far ahead.",
+                suggestion=f"Schedules only go out to {latest.isoformat()}.",
             )
 
     trip_class = str(arguments.get("trip_class") or "Y").strip().upper()
@@ -483,7 +512,8 @@ def search_flights(arguments: dict[str, Any], *, today: date | None = None) -> d
     plan: list[int] = []
     if kilometres <= MAX_NONSTOP_KM:
         plan.extend([0, 0])
-    plan.extend([1, 1, 1])
+    if kilometres > MIN_CONNECTION_KM:
+        plan.extend([1, 1, 1])
     if kilometres > 2500:
         plan.extend([2, 2])
     elif kilometres > 1500:

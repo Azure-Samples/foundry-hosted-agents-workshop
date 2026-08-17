@@ -176,25 +176,6 @@ def distance_km(origin: Airport, destination: Airport) -> float:
     return 2 * earth_radius_km * math.asin(math.sqrt(a))
 
 
-def _synthesize(code: str) -> Airport:
-    """Invent a stable airport for an IATA-shaped code we don't know.
-
-    Keeps the mock useful for any route a participant types, while staying
-    deterministic: the same code always yields the same coordinates.
-    """
-    seed = sum(ord(character) * (31**index) for index, character in enumerate(code))
-    latitude = round(((seed % 12_000) / 100.0) - 60.0, 4)
-    longitude = round((((seed // 12_000) % 36_000) / 100.0) - 180.0, 4)
-    return Airport(
-        iata=code,
-        name=f"{code} Airport (mock)",
-        city=f"{code} (mock city)",
-        country_code="ZZ",
-        latitude=latitude,
-        longitude=longitude,
-    )
-
-
 def _disambiguation_error(query: str, candidates: list[Airport]) -> MockToolError:
     options = [airport.as_resolved() for airport in candidates]
     names = ", ".join(f"{airport.iata} ({airport.name})" for airport in candidates)
@@ -218,9 +199,18 @@ def resolve_airport(query: str, field: str) -> Airport:
     cleaned = query.strip()
     normalized = cleaned.casefold()
 
+    # An IATA-shaped string is only ever a code, so an unknown one is a typo --
+    # inventing an airport for it would answer a mistake with a confident lie.
     if IATA_CODE_RE.match(cleaned):
-        code = cleaned.upper()
-        return AIRPORTS.get(code) or _synthesize(code)
+        known = AIRPORTS.get(cleaned.upper())
+        if known:
+            return known
+        raise MockToolError(
+            code="airport_not_found",
+            message=f"'{cleaned.upper()}' is not an airport this mock knows.",
+            suggestion="Check the IATA code, or pass a city name such as 'Lisbon'.",
+            details={"field": field},
+        )
 
     metro = METRO_AREAS.get(normalized)
     if metro:

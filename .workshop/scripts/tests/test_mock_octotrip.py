@@ -253,15 +253,51 @@ def test_past_departure_dates_are_rejected():
     assert excinfo.value.code == "invalid_date"
 
 
-def test_unknown_iata_codes_still_produce_a_stable_route():
+def test_unknown_iata_codes_are_rejected_not_invented():
+    """A typo should come back as an error, not as a confident fake route."""
     arguments = {"origin": "ZZX", "destination": "LHR", "departure_date": _future(10)}
 
-    first, is_error = _call_search(arguments)
-    second, _ = _call_search(arguments)
+    payload, is_error = _call_search(arguments)
+
+    assert is_error is True
+    assert payload["error"]["code"] == "airport_not_found"
+    assert payload["error"]["field"] == "origin"
+
+
+def test_short_hops_are_non_stop_only():
+    """Nobody connects between Lisbon and Porto."""
+    payload, is_error = _call_search(
+        {"origin": "LIS", "destination": "OPO", "departure_date": _future(10)}
+    )
 
     assert is_error is False
-    assert first["origin_resolved"]["iata"] == "ZZX"
-    assert first == second
+    assert payload["results"], "expected at least one offer"
+    assert {offer["stops"] for offer in payload["results"]} == {0}
+
+
+def test_absurd_dates_are_rejected_rather_than_crashing():
+    payload, is_error = _call_search(
+        {"origin": "LIS", "destination": "LHR", "departure_date": "9999-12-31"}
+    )
+
+    assert is_error is True
+    assert payload["error"]["code"] == "invalid_date"
+
+
+def test_fractional_passenger_counts_are_rejected():
+    """int() truncates, so 1.9 must not quietly become one adult."""
+    payload, is_error = _call_search(
+        {
+            "origin": "LIS",
+            "destination": "LHR",
+            "departure_date": _future(10),
+            "adults": 1.9,
+        }
+    )
+
+    assert is_error is True
+    assert payload["error"]["code"] == "invalid_request"
+
 
 def test_tool_properties_match_the_mcp_trigger_contract() -> None:
     """The Azure Functions trigger takes the same schema in its own shape."""

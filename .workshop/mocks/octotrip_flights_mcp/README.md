@@ -18,15 +18,17 @@ answer from them:
 
 - **Real airport coordinates** (60+ airports) give real great-circle distances,
   so flight durations and local departure/arrival times — including next-day
-  arrivals across time zones — come out right.
+  arrivals across time zones — come out right. Local times are approximated from
+  longitude, so they ignore DST and the odd civil time zone.
 - **Connections** are picked from a global hub list, preferring hubs near the
-  midpoint of the route. Short routes only get direct and one-stop offers; no
-  non-stop is offered beyond 13 500 km.
+  midpoint of the route. Short hops are non-stop or nothing; no non-stop is
+  offered beyond 13 500 km.
 - **Prices** scale with distance, stops, cabin class, one-way vs round trip,
   passenger mix, and currency.
 - **The same request always returns the same offers.** The random seed is a
-  SHA-256 hash of the request, so a demo is reproducible — but change the date,
-  the cabin, or the passenger count and the results change with it.
+  SHA-256 hash of the request, so a demo is reproducible on a given Python
+  version — but change the date, the cabin, or the passenger count and the
+  results change with it.
 
 It mirrors the real server's tool contract: one `search` tool, the same
 parameters, the same response shape, and the same structured errors
@@ -52,7 +54,7 @@ curl -s http://127.0.0.1:8931/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search",
-       "arguments":{"origin":"BRU","destination":"LIS","departure_date":"2026-09-07"}}}'
+       "arguments":{"origin":"BRU","destination":"LIS","departure_date":"tomorrow"}}}'
 ```
 
 > **Foundry can't call localhost.** `client.get_mcp_tool(...)` registers a
@@ -72,35 +74,43 @@ then, with the mock already running on port 8931:
 
 ```bash
 devtunnel user login
-devtunnel create octotrip-mock --allow-anonymous
-devtunnel port create octotrip-mock --port-number 8931
-devtunnel host octotrip-mock
+devtunnel host --port-number 8931 --allow-anonymous
 ```
 
-`--allow-anonymous` matters: Foundry calls the tunnel without a dev tunnel token,
-so a protected tunnel answers 401 and your agent just sees a broken tool.
+That hosts a temporary tunnel and prints a public HTTPS URL. Two flags matter:
 
-`devtunnel host` prints a forwarding URL. Append the endpoint path and point
-Step 3 at it:
+- `--allow-anonymous` — Foundry calls the tunnel without a dev tunnel token, so
+  a protected tunnel answers 401 and your agent just sees a broken tool.
+- No tunnel ID — `devtunnel create <id>` takes a **globally unique** ID, so a
+  name like `octotrip-mock` fails for everyone but the first person to claim it.
+  A temporary tunnel gets a generated ID and disappears when you stop hosting.
+
+Append `/mcp` to the URL it prints, then point Step 3 at it — in `.env`, in the
+azd environment, and in the manifest:
 
 ```env
 # .env
 MCP_SERVER_LABEL=octotrip_flights_mock
-MCP_SERVER_URL=https://<tunnel-id>-8931.<region>.devtunnels.ms/mcp
+MCP_SERVER_URL=https://<generated-id>-8931.<region>.devtunnels.ms/mcp
 ```
 
-Mirror both values in `agent.manifest.yaml` under `template.environment_variables`,
-exactly as Step 3 describes for the real server, and redeploy the agent so it
-picks up the new URL.
+```bash
+cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+azd env set MCP_SERVER_LABEL "$MCP_SERVER_LABEL"
+azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
+```
 
-Two things to keep in mind:
+`azd` reads its own environment, not the repo's `.env`, so skipping the
+`azd env set` pair leaves your agent calling the real OctoTrip server. Mirror
+both names in `agent.manifest.yaml` under `template.environment_variables` too,
+exactly as Step 3 describes, then restart `azd ai agent run` (or redeploy) so the
+agent picks up the new URL.
 
-- **The URL changes** every time you create a new tunnel, and the tunnel dies
-  when you stop hosting it. Re-run `devtunnel host octotrip-mock` to get the same
-  URL back; create a fresh tunnel only if you deleted it.
-- **Anonymous means anonymous.** Anyone with the URL can call it while it's up.
-  That's acceptable for a mock that invents flights and stores nothing — never do
-  it for a service that touches real data or credentials.
+The URL changes every time you host a fresh temporary tunnel, so redo those two
+`azd env set` commands whenever you restart it. And remember that anonymous means
+anonymous: anyone with the URL can call it while it's up. That's fine for a mock
+that invents flights and stores nothing — never do it for a service that touches
+real data or credentials.
 
 In a Codespace or a VS Code dev container you can skip the CLI: forward port 8931
 in the **Ports** panel and set its visibility to **Public**, which gives you an
@@ -160,7 +170,8 @@ STORAGE_ID=$(az storage account show \
   --name $STORAGE --resource-group $RESOURCE_GROUP --query id -o tsv)
 
 az role assignment create \
-  --assignee $PRINCIPAL \
+  --assignee-object-id "$PRINCIPAL" \
+  --assignee-principal-type ServicePrincipal \
   --role "Storage Blob Data Owner" \
   --scope $STORAGE_ID
 
@@ -177,7 +188,9 @@ func azure functionapp publish $APP
 
 `Storage Blob Data Owner` is scoped to this one storage account, and it is the
 narrowest role the Functions host accepts for deployment storage on Flex
-Consumption. Delete the resource group when the workshop is over.
+Consumption. `--assignee-object-id` avoids the Microsoft Graph lookup that plain
+`--assignee` needs — the same reason Step 2 uses it. Delete the resource group
+when the workshop is over.
 
 ### No key needed — but verify it
 
@@ -203,37 +216,21 @@ curl -si -X POST https://$APP.azurewebsites.net/runtime/webhooks/mcp \
        "capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}' | head -n 1
 ```
 
-If you get a **401**, your Functions host predates the fix for
+A **401** means your Functions host predates the fix for
 [azure-functions-mcp-extension#138](https://github.com/Azure/azure-functions-mcp-extension/issues/138),
-where `Anonymous` was ignored on host runtimes older than 4.1045.0. Two ways out:
+where `Anonymous` was ignored on host runtimes older than 4.1045.0. Check the
+version under **Diagnose and solve problems → Functions Host** in the portal and
+redeploy — Flex Consumption moves apps onto newer hosts automatically.
 
-1. Give the app a moment and redeploy — Flex Consumption picks up newer hosts
-   automatically, and you can confirm the version under **Diagnose and solve
-   problems → Functions Host** in the portal.
-2. Or just use the key. Fetch it, keep it in `.env` (never in the manifest, never
-   committed), and pass it as a header:
-
-   ```bash
-   az functionapp keys list \
-     --resource-group $RESOURCE_GROUP --name $APP \
-     --query systemKeys.mcp_extension --output tsv
-   ```
-
-   ```python
-   mcp_tool = client.get_mcp_tool(
-       server_label=os.environ["MCP_SERVER_LABEL"],
-       server_url=os.environ["MCP_SERVER_URL"],
-       headers={"x-functions-key": os.environ["MCP_SERVER_KEY"]},
-   )
-   ```
-
-   A hosted agent reads that from its own environment, so add `MCP_SERVER_KEY` to
-   `template.environment_variables` in `agent.manifest.yaml` — with the value
-   supplied at deploy time, not written into the file.
+Don't paper over it with the system key. Wiring `x-functions-key` into the agent
+means a shared secret in your environment and your manifest, which is exactly
+what this workshop avoids everywhere else; the dev tunnel above gets you a
+working anonymous endpoint in the meantime.
 
 Local runs never ask for a key, whichever level you set.
 
-Point Step 3 at the deployed app:
+Point Step 3 at the deployed app — `.env`, the azd environment, and the manifest,
+the same three places as the tunnel:
 
 ```env
 # .env

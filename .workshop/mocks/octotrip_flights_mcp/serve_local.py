@@ -29,20 +29,35 @@ class MockMcpHandler(BaseHTTPRequestHandler):
 
     server_version = f"{SERVER_NAME}/{SERVER_VERSION}"
     protocol_version = "HTTP/1.1"
+    # A client that announces a body and then stalls would otherwise hold a
+    # thread forever -- worth guarding, since this often runs behind a tunnel.
+    timeout = 30
+
+    def _reject(self, status: int) -> None:
+        self.send_response(status)
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
 
     def _dispatch(self, method: str) -> None:
-        body = b""
+        raw_length = self.headers.get("Content-Length") or "0"
         try:
-            content_length = int(self.headers.get("Content-Length") or 0)
+            content_length = int(raw_length)
         except ValueError:
-            content_length = 0
-        if content_length > MAX_BODY_BYTES:
-            self.send_response(413)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            self._reject(400)
             return
-        if content_length:
-            body = self.rfile.read(content_length)
+        if content_length < 0:
+            self._reject(400)
+            return
+        if content_length > MAX_BODY_BYTES:
+            self._reject(413)
+            return
+
+        body = self.rfile.read(content_length) if content_length else b""
+        if len(body) != content_length:
+            self._reject(400)
+            return
 
         result = handle_http_request(
             method=method,
@@ -79,6 +94,7 @@ def main() -> int:
     args = parser.parse_args()
 
     httpd = ThreadingHTTPServer((args.host, args.port), MockMcpHandler)
+    httpd.daemon_threads = True
     print(f"{SERVER_NAME} {SERVER_VERSION} listening on http://{args.host}:{args.port}/mcp")
     print("Synthetic data only — no live flights. Press Ctrl+C to stop.")
     try:

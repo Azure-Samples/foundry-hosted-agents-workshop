@@ -80,6 +80,9 @@ def search(
             "locale": locale,
         }
     )
+    # The trigger has no channel for MCP's isError flag, so a rejected request
+    # comes back as a normal result. The payload is the same either way: the
+    # model reads the error code out of the JSON, exactly as it does locally.
     if is_error:
         logging.info("Mock search rejected a request: %s", payload["error"]["code"])
 
