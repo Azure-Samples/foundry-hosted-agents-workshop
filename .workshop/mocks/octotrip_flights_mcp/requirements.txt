@@ -1,0 +1,4 @@
+# The mock itself is standard library only. The Functions host needs the worker
+# library, and the @app.mcp_tool / @app.mcp_tool_property decorators arrived in
+# azure-functions 1.25.0.
+azure-functions>=1.25.0

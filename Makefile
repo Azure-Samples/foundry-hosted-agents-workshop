@@ -9,7 +9,7 @@
 
 PYTHON ?= python
 
-.PHONY: help advance back reset reset-current preflight sync-template
+.PHONY: help advance back reset reset-current preflight sync-template mock-mcp
 
 help:
 	@echo "Workshop targets (fully-local flow):"
@@ -20,6 +20,8 @@ help:
 	@echo "                      re-render its README, then auto-commit (backs up"
 	@echo "                      travel_assistant/ first). Pairs with sync-template."
 	@echo "  make preflight      Run environment preflight checks"
+	@echo "  make mock-mcp       Serve the OctoTrip Flights mock MCP server locally,"
+	@echo "                      for when the real one is down (Step 3 troubleshooting)"
 	@echo "  make sync-template  Pull latest .workshop/ and .github/ from the upstream"
 	@echo "                      template and commit, without advancing the step"
 	@echo "                      (review, then 'git push' yourself). Unlike the CI"
@@ -31,6 +33,7 @@ help:
 	@echo "  $(PYTHON) .workshop/scripts/advance_step.py --reset --auto-commit"
 	@echo "  $(PYTHON) .workshop/scripts/advance_step.py --reset-current --auto-commit"
 	@echo "  $(PYTHON) .workshop/scripts/preflight.py"
+	@echo "  $(PYTHON) .workshop/mocks/octotrip_flights_mcp/serve_local.py"
 	@echo "  $(PYTHON) .workshop/scripts/sync_template.py --auto-commit   # add --push to push too"
 
 advance:
@@ -47,6 +50,9 @@ reset-current:
 
 preflight:
 	$(PYTHON) .workshop/scripts/preflight.py
+
+mock-mcp:
+	$(PYTHON) .workshop/mocks/octotrip_flights_mcp/serve_local.py
 
 sync-template:
 	$(PYTHON) .workshop/scripts/sync_template.py --auto-commit

@@ -1,0 +1,7 @@
+.git*
+.venv
+.vscode
+__pycache__
+*.md
+local.settings.json
+serve_local.py

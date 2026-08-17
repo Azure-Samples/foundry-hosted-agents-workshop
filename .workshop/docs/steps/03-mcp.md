@@ -294,7 +294,27 @@ Check the URL in `.env`.
 MCP_SERVER_URL=https://mcp.octotrip.app/flights/mcp
 ```
 
-The OctoTrip Flights MCP is public and anonymous, but it's rate-limited (roughly one request per second). If calls fail intermittently, space out your prompts and retry. If the endpoint is temporarily unavailable, try again later.
+The OctoTrip Flights MCP is public and anonymous, but it's rate-limited (roughly one request per second). If calls fail intermittently, space out your prompts and retry. If the endpoint is temporarily unavailable, try again later — or switch to the mock below.
+
+### Use the mock when OctoTrip is unavailable
+
+This repo ships a stand-in that speaks the same MCP protocol and exposes the same `search` tool, but **generates every offer from your request** instead of calling a live service: [`.workshop/mocks/octotrip_flights_mcp/`](.workshop/mocks/octotrip_flights_mcp/). Real airport coordinates give it believable durations, connections, and local arrival times, and the same request always returns the same offers — handy for a demo. Nothing it returns is real: the airlines are invented and every payload is marked `"mock": true`.
+
+Run it locally with no dependencies:
+
+```bash
+make mock-mcp   # or: python .workshop/mocks/octotrip_flights_mcp/serve_local.py
+```
+
+That's enough for any MCP client on your machine, but **not** for your agent: `client.get_mcp_tool(...)` registers a *hosted* MCP tool, so Foundry calls the URL from its own network and never reaches your `localhost`. To point the agent at the mock, publish it with a dev tunnel or deploy it — the same folder is an Azure Functions app with anonymous access, and its [README](.workshop/mocks/octotrip_flights_mcp/README.md) has the `az` commands. Then swap the two settings in `.env` **and** the manifest:
+
+```env
+# .env
+MCP_SERVER_LABEL=octotrip_flights_mock
+MCP_SERVER_URL=https://<your-app>.azurewebsites.net/runtime/webhooks/mcp
+```
+
+Switch back to `https://mcp.octotrip.app/flights/mcp` once the real server answers again.
 
 ### No MCP tools listed
 
