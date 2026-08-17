@@ -57,8 +57,54 @@ curl -s http://127.0.0.1:8931/mcp \
 
 > **Foundry can't call localhost.** `client.get_mcp_tool(...)` registers a
 > *hosted* MCP tool: the Foundry service calls the URL from its own network, not
-> from your container. For your agent to use the mock, publish it — with a dev
-> tunnel, or by deploying it (below).
+> from your container. So `http://127.0.0.1:8931/mcp` works for `curl` and for a
+> local MCP client, but never for your agent. Give it a public URL — a dev tunnel
+> (below) while you iterate, or a deployment (further below) for something stable.
+
+## Expose your local run with a dev tunnel
+
+This is the normal inner-loop pattern: keep the server on your machine, where you
+can edit and restart it in seconds, and let Foundry reach it through a temporary
+public HTTPS URL.
+
+Install the [dev tunnel CLI](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started),
+then, with the mock already running on port 8931:
+
+```bash
+devtunnel user login
+devtunnel create octotrip-mock --allow-anonymous
+devtunnel port create octotrip-mock --port-number 8931
+devtunnel host octotrip-mock
+```
+
+`--allow-anonymous` matters: Foundry calls the tunnel without a dev tunnel token,
+so a protected tunnel answers 401 and your agent just sees a broken tool.
+
+`devtunnel host` prints a forwarding URL. Append the endpoint path and point
+Step 3 at it:
+
+```env
+# .env
+MCP_SERVER_LABEL=octotrip_flights_mock
+MCP_SERVER_URL=https://<tunnel-id>-8931.<region>.devtunnels.ms/mcp
+```
+
+Mirror both values in `agent.manifest.yaml` under `template.environment_variables`,
+exactly as Step 3 describes for the real server, and redeploy the agent so it
+picks up the new URL.
+
+Two things to keep in mind:
+
+- **The URL changes** every time you create a new tunnel, and the tunnel dies
+  when you stop hosting it. Re-run `devtunnel host octotrip-mock` to get the same
+  URL back; create a fresh tunnel only if you deleted it.
+- **Anonymous means anonymous.** Anyone with the URL can call it while it's up.
+  That's acceptable for a mock that invents flights and stores nothing — never do
+  it for a service that touches real data or credentials.
+
+In a Codespace or a VS Code dev container you can skip the CLI: forward port 8931
+in the **Ports** panel and set its visibility to **Public**, which gives you an
+equivalent URL.
 
 ## Deploy it to Azure Functions
 
@@ -71,14 +117,10 @@ parameter's type and requiredness from the signature — plus one
 `octotrip_mock/tool.py` so both hosts stay in step. That needs
 `azure-functions` 1.25.0 or later.
 
-`host.json` sets `webhookAuthorizationLevel` to `Anonymous`, so the deployed
-endpoint needs no key — same as the public server it replaces. That is safe
-here because the app holds no data, reads nothing, and only returns invented
-flights; don't copy that setting into an app that does anything real.
-
 Run it locally with [Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local)
 4.0.7030 or later (`func start` from this folder) to get
-`http://localhost:7071/runtime/webhooks/mcp`.
+`http://localhost:7071/runtime/webhooks/mcp` — which you can put through a dev
+tunnel exactly as above, using port 7071 and that path.
 
 To deploy, from this folder:
 
@@ -136,6 +178,60 @@ func azure functionapp publish $APP
 `Storage Blob Data Owner` is scoped to this one storage account, and it is the
 narrowest role the Functions host accepts for deployment storage on Flex
 Consumption. Delete the resource group when the workshop is over.
+
+### No key needed — but verify it
+
+By default an MCP tool trigger is protected: the endpoint demands the system key
+named `mcp_extension`, as `?code=<key>` or an `x-functions-key` header. This
+mock's `host.json` opts out with
+`extensions.mcp.system.webhookAuthorizationLevel: "Anonymous"`, so the deployed
+URL takes no key at all — same as the public server it replaces. (The `system`
+nesting is required; a top-level `webhookAuthorizationLevel` under `mcp` is
+silently ignored.)
+
+That's safe here because the app stores nothing, reads nothing, and only returns
+invented flights. Don't carry the setting into an app that does anything real.
+
+Check that it took effect before wiring up your agent — an unauthenticated
+`initialize` should come back with a result, not a 401:
+
+```bash
+curl -si -X POST https://$APP.azurewebsites.net/runtime/webhooks/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18",
+       "capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}' | head -n 1
+```
+
+If you get a **401**, your Functions host predates the fix for
+[azure-functions-mcp-extension#138](https://github.com/Azure/azure-functions-mcp-extension/issues/138),
+where `Anonymous` was ignored on host runtimes older than 4.1045.0. Two ways out:
+
+1. Give the app a moment and redeploy — Flex Consumption picks up newer hosts
+   automatically, and you can confirm the version under **Diagnose and solve
+   problems → Functions Host** in the portal.
+2. Or just use the key. Fetch it, keep it in `.env` (never in the manifest, never
+   committed), and pass it as a header:
+
+   ```bash
+   az functionapp keys list \
+     --resource-group $RESOURCE_GROUP --name $APP \
+     --query systemKeys.mcp_extension --output tsv
+   ```
+
+   ```python
+   mcp_tool = client.get_mcp_tool(
+       server_label=os.environ["MCP_SERVER_LABEL"],
+       server_url=os.environ["MCP_SERVER_URL"],
+       headers={"x-functions-key": os.environ["MCP_SERVER_KEY"]},
+   )
+   ```
+
+   A hosted agent reads that from its own environment, so add `MCP_SERVER_KEY` to
+   `template.environment_variables` in `agent.manifest.yaml` — with the value
+   supplied at deploy time, not written into the file.
+
+Local runs never ask for a key, whichever level you set.
 
 Point Step 3 at the deployed app:
 

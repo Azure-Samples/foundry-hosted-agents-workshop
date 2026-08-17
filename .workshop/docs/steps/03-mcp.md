@@ -306,12 +306,27 @@ Run it locally with no dependencies:
 make mock-mcp   # or: python .workshop/mocks/octotrip_flights_mcp/serve_local.py
 ```
 
-That's enough for any MCP client on your machine, but **not** for your agent: `client.get_mcp_tool(...)` registers a *hosted* MCP tool, so Foundry calls the URL from its own network and never reaches your `localhost`. To point the agent at the mock, publish it with a dev tunnel or deploy it — the same folder is an Azure Functions app with anonymous access, and its [README](.workshop/mocks/octotrip_flights_mcp/README.md) has the `az` commands. Then swap the two settings in `.env` **and** the manifest:
+That's enough for any MCP client on your machine, but **not** for your agent: `client.get_mcp_tool(...)` registers a *hosted* MCP tool, so Foundry calls the URL from its own network and never reaches your `localhost`. Give it a public URL instead.
+
+The quick way, and the usual inner-loop pattern — keep the server local, tunnel it out with the [dev tunnel CLI](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started):
+
+```bash
+devtunnel user login
+devtunnel create octotrip-mock --allow-anonymous
+devtunnel port create octotrip-mock --port-number 8931
+devtunnel host octotrip-mock
+```
+
+`--allow-anonymous` is required — Foundry sends no tunnel token, and a protected tunnel just answers 401. `devtunnel host` prints the public URL; keep it running while you work, and re-run it to get the same URL back. In a Codespace, forwarding port 8931 as **Public** does the same job.
+
+For something that outlives your terminal, deploy it: the same folder is an Azure Functions app with anonymous access, and its [README](.workshop/mocks/octotrip_flights_mcp/README.md) has the `az` commands and the key fallback if your Functions host is too old to honour `Anonymous`.
+
+Either way, swap the two settings in `.env` **and** the manifest:
 
 ```env
 # .env
 MCP_SERVER_LABEL=octotrip_flights_mock
-MCP_SERVER_URL=https://<your-app>.azurewebsites.net/runtime/webhooks/mcp
+MCP_SERVER_URL=https://<tunnel-id>-8931.<region>.devtunnels.ms/mcp
 ```
 
 Switch back to `https://mcp.octotrip.app/flights/mcp` once the real server answers again.

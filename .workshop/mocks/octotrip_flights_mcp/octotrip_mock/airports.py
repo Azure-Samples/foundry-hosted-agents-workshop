@@ -91,12 +91,14 @@ _AIRPORT_ROWS: tuple[tuple[str, str, str, str, float, float], ...] = (
     ("MXP", "Milan Malpensa Airport", "Milan", "IT", 45.6306, 8.7281),
     ("NBO", "Jomo Kenyatta International Airport", "Nairobi", "KE", -1.3192, 36.9278),
     ("NRT", "Tokyo Narita International Airport", "Tokyo", "JP", 35.7720, 140.3929),
+    ("OPO", "Porto Francisco Sa Carneiro Airport", "Porto", "PT", 41.2481, -8.6814),
     ("ORD", "Chicago O'Hare International Airport", "Chicago", "US", 41.9742, -87.9073),
     ("ORY", "Paris Orly Airport", "Paris", "FR", 48.7233, 2.3794),
     ("OSL", "Oslo Gardermoen Airport", "Oslo", "NO", 60.1976, 11.1004),
     ("PEK", "Beijing Capital International Airport", "Beijing", "CN", 40.0799, 116.6031),
     ("PRG", "Vaclav Havel Airport Prague", "Prague", "CZ", 50.1008, 14.2600),
     ("PVG", "Shanghai Pudong International Airport", "Shanghai", "CN", 31.1443, 121.8083),
+    ("RAK", "Marrakech Menara Airport", "Marrakech", "MA", 31.6069, -8.0363),
     ("SEA", "Seattle-Tacoma International Airport", "Seattle", "US", 47.4502, -122.3088),
     ("SFO", "San Francisco International Airport", "San Francisco", "US", 37.6213, -122.3790),
     ("SIN", "Singapore Changi Airport", "Singapore", "SG", 1.3644, 103.9915),
@@ -111,11 +113,24 @@ _AIRPORT_ROWS: tuple[tuple[str, str, str, str, float, float], ...] = (
 
 AIRPORTS: dict[str, Airport] = {row[0]: Airport(*row) for row in _AIRPORT_ROWS}
 
-# Metro areas whose common name doesn't match every airport's city field.
+# Metro areas whose common name doesn't match every airport's city field, and
+# which have no single obvious main airport. These stay ambiguous on purpose:
+# the real server asks you to choose, and so does the mock.
 METRO_AREAS: dict[str, tuple[str, ...]] = {
     "new york": ("JFK", "LGA", "EWR"),
     "new york city": ("JFK", "LGA", "EWR"),
     "nyc": ("JFK", "LGA", "EWR"),
+}
+
+# Cities served by several airports where one is clearly the principal one.
+# Asking for "Tokyo" should get you Haneda, not a disambiguation prompt.
+PRIMARY_AIRPORTS: dict[str, str] = {
+    "london": "LHR",
+    "milan": "MXP",
+    "paris": "CDG",
+    "rome": "FCO",
+    "seoul": "ICN",
+    "tokyo": "HND",
 }
 
 # Hubs the mock routes connecting itineraries through. Spread across regions so
@@ -213,6 +228,10 @@ def resolve_airport(query: str, field: str) -> Airport:
         if len(candidates) == 1:
             return candidates[0]
         raise _disambiguation_error(cleaned, candidates)
+
+    primary = PRIMARY_AIRPORTS.get(normalized)
+    if primary:
+        return AIRPORTS[primary]
 
     by_city = [airport for airport in AIRPORTS.values() if airport.city.casefold() == normalized]
     if len(by_city) == 1:

@@ -9,6 +9,7 @@ deterministically from the request.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -28,6 +29,7 @@ from octotrip_mock import (  # noqa: E402
     search_flights,
     tool_properties_json,
 )
+from octotrip_mock.airports import AIRPORTS, resolve_airport  # noqa: E402
 from octotrip_mock.server import DEFAULT_PROTOCOL_VERSION  # noqa: E402
 
 JSON_ACCEPT = "application/json"
@@ -321,3 +323,63 @@ def test_the_functions_host_advertises_the_same_contract() -> None:
         assert actual["propertyType"] == expected["propertyType"], name
         assert actual["description"] == expected["description"], name
         assert actual["isRequired"] == expected["isRequired"], name
+
+WORKSHOP_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _rag_cities() -> set[str]:
+    """Every destination city the workshop's RAG index ships with."""
+    cities: set[str] = set()
+    for dataset in WORKSHOP_ROOT.rglob("travel_indexer/data/destinations.json"):
+        for entry in json.loads(dataset.read_text(encoding="utf-8")):
+            cities.add(entry["city"])
+    return cities
+
+
+def _step_doc_flight_examples() -> set[tuple[str, str]]:
+    """The ``City (CODE)`` pairs the step docs use in their flight examples.
+
+    Only lines that mention flights are scanned, and the city name has to sit
+    directly in front of the code, so unrelated parenthesised acronyms such as
+    ``(MCP)`` or ``(PDF)`` never make it into the results.
+    """
+    pairs: set[tuple[str, str]] = set()
+    for doc in (WORKSHOP_ROOT / "docs" / "steps").glob("*.md"):
+        for line in doc.read_text(encoding="utf-8").splitlines():
+            if "flight" in line.casefold():
+                for city, code in re.findall(r"((?:[A-Z][a-z]+ )+)\(([A-Z]{3})\)", line):
+                    pairs.add((city.strip(), code))
+    return pairs
+
+
+def test_every_rag_destination_resolves() -> None:
+    """A city the agent can retrieve must be a city the mock can fly you to."""
+    cities = _rag_cities()
+    assert cities, "expected to find the workshop's destinations index"
+
+    for city in sorted(cities):
+        airport = resolve_airport(city, "destination")
+        assert airport.country_code != "ZZ", f"{city} falls back to a synthesized airport"
+        assert airport.iata in AIRPORTS, city
+
+
+def test_every_step_doc_flight_example_resolves() -> None:
+    """The airports the step docs tell participants to type must be real here."""
+    examples = _step_doc_flight_examples()
+    assert examples, "expected the step docs to contain flight examples"
+
+    for city, code in sorted(examples):
+        assert code in AIRPORTS, f"{city} ({code}) is in a step doc but missing from the mock"
+        assert AIRPORTS[code].city == city, f"{code} is {AIRPORTS[code].city} here, not {city}"
+
+
+def test_multi_airport_cities_pick_their_main_airport() -> None:
+    """Asking for 'Tokyo' should fly, not start a negotiation."""
+    assert resolve_airport("Tokyo", "origin").iata == "HND"
+    assert resolve_airport("London", "origin").iata == "LHR"
+    assert resolve_airport("Paris", "origin").iata == "CDG"
+
+    # New York stays ambiguous on purpose: it spans two cities and three airports.
+    with pytest.raises(MockToolError) as excinfo:
+        resolve_airport("New York", "origin")
+    assert excinfo.value.code == "disambiguation_needed"
