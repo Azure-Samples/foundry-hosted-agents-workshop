@@ -336,6 +336,8 @@ azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
 
 Skipping the `azd env set` pair is the usual reason the agent keeps calling the real server: `azd` reads its own environment, not the repo's `.env`. Restart `azd ai agent run` afterwards. A temporary tunnel gets a new URL each time you host it, so redo those two commands whenever you restart it.
 
+> **`--allow-anonymous` is safe for this mock only.** It publishes an endpoint that authenticates nobody, which is fine here because the mock holds no data, has no managed identity, and invents every answer — there is nothing for a stranger to read or borrow. Don't reuse the flag for a server that fronts real data. In [Step 5](.workshop/docs/steps/05-rag.md) your Search MCP holds `Search Index Data Reader` over your destinations index; exposing *that* anonymously would publish read access to every document in it, to anyone with the URL, with no sign-in and no audit trail. A retrieval endpoint authenticates its callers with Entra ID — tunnelled or deployed.
+
 Switch back to `https://mcp.octotrip.app/flights/mcp` once the real server answers again.
 
 ### No MCP tools listed

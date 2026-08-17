@@ -108,13 +108,45 @@ agent picks up the new URL.
 
 The URL changes every time you host a fresh temporary tunnel, so redo those two
 `azd env set` commands whenever you restart it. And remember that anonymous means
-anonymous: anyone with the URL can call it while it's up. That's fine for a mock
-that invents flights and stores nothing — never do it for a service that touches
-real data or credentials.
+anonymous: anyone with the URL can call it while it's up. That's fine here — see
+the disclaimer below for why, and for where the same pattern would be a breach.
 
 In a Codespace or a VS Code dev container you can skip the CLI: forward port 8931
 in the **Ports** panel and set its visibility to **Public**, which gives you an
 equivalent URL.
+
+## Disclaimer: anonymous is safe *here*, not in general
+
+Both paths in this README — the `--allow-anonymous` dev tunnel and the
+`"Anonymous"` Functions setting — publish an MCP endpoint that authenticates
+nobody. That is a deliberate, bounded choice for **this** server, and it rests
+entirely on what the server is:
+
+- it holds no data and reads no data source;
+- it has no managed identity and no data-plane role, so there is nothing for a
+  caller to borrow;
+- every response is invented from the request, so the worst a stranger can do is
+  make up their own fake flights.
+
+**Do not carry this over to a RAG endpoint.** In Step 5 you put your destinations
+index behind an Azure AI Search MCP surface, and that server *does* hold a
+data-plane role (`Search Index Data Reader`) against a real index. An MCP server
+that authenticates nobody while holding a role that reads your data is a
+[confused deputy](https://en.wikipedia.org/wiki/Confused_deputy_problem): making
+it anonymous publishes read access to everything in the index — every document,
+to anyone who finds the URL, with no sign-in, no audit trail, and no way to
+revoke one caller. Prompt-injected or scraped content in that index leaks the
+same way.
+
+So a retrieval endpoint must authenticate its callers with Entra ID and
+authorize them, exactly as [Step 5](../../docs/steps/05-rag.md) requires — and
+that applies just as much to a dev tunnel in front of a local RAG server as to a
+deployed one. `devtunnel host` **without** `--allow-anonymous` requires a tunnel
+token and is the right default for anything that touches real data.
+
+The rule of thumb: anonymous is only ever acceptable when the endpoint has no
+data and no privileges to lend. This mock qualifies. Almost nothing else you
+build in this workshop does.
 
 ## Deploy it to Azure Functions
 
@@ -202,8 +234,10 @@ URL takes no key at all — same as the public server it replaces. (The `system`
 nesting is required; a top-level `webhookAuthorizationLevel` under `mcp` is
 silently ignored.)
 
-That's safe here because the app stores nothing, reads nothing, and only returns
-invented flights. Don't carry the setting into an app that does anything real.
+That's safe here for the reasons in the
+[disclaimer above](#disclaimer-anonymous-is-safe-here-not-in-general) — and for
+the same reasons it must not be copied onto a Functions app that fronts an index,
+a database, or any other real data source.
 
 Check that it took effect before wiring up your agent — an unauthenticated
 `initialize` should come back with a result, not a 401:
