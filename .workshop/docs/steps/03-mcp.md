@@ -294,7 +294,49 @@ Check the URL in `.env`.
 MCP_SERVER_URL=https://mcp.octotrip.app/flights/mcp
 ```
 
-The OctoTrip Flights MCP is public and anonymous, but it's rate-limited (roughly one request per second). If calls fail intermittently, space out your prompts and retry. If the endpoint is temporarily unavailable, try again later.
+The OctoTrip Flights MCP is public and anonymous, but it's rate-limited (roughly one request per second). If calls fail intermittently, space out your prompts and retry. If the endpoint is temporarily unavailable, try again later — or switch to the mock below.
+
+### Use the mock when OctoTrip is unavailable
+
+This repo ships a stand-in that speaks the same MCP protocol and exposes the same `search` tool, but **generates every offer from your request** instead of calling a live service: [`.workshop/mocks/octotrip_flights_mcp/`](.workshop/mocks/octotrip_flights_mcp/). Real airport coordinates give it believable durations, connections, and local arrival times, and the same request always returns the same offers — handy for a demo. Nothing it returns is real: the airlines are invented and every payload is marked `"mock": true`.
+
+Run it locally with no dependencies:
+
+```bash
+make mock-mcp   # or: python .workshop/mocks/octotrip_flights_mcp/serve_local.py
+```
+
+That's enough for any MCP client on your machine, but **not** for your agent: `client.get_mcp_tool(...)` registers a *hosted* MCP tool, so Foundry calls the URL from its own network and never reaches your `localhost`. Give it a public URL instead.
+
+The quick way, and the usual inner-loop pattern — keep the server local, tunnel it out with the [dev tunnel CLI](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started):
+
+```bash
+devtunnel user login
+devtunnel host --port-number 8931 --allow-anonymous
+```
+
+`--allow-anonymous` is required — Foundry sends no tunnel token, and a protected tunnel just answers 401. Don't name the tunnel: `devtunnel create <id>` needs a **globally unique** ID, so a shared name fails for everyone after the first person. `devtunnel host` prints the public URL; keep it running while you work. In a Codespace, forwarding port 8931 as **Public** does the same job.
+
+For something that outlives your terminal, deploy it: the same folder is an Azure Functions app with anonymous access, and its [README](.workshop/mocks/octotrip_flights_mcp/README.md) has the `az` commands.
+
+Either way, append `/mcp` to the URL. Only `MCP_SERVER_URL` changes — leave `MCP_SERVER_LABEL` alone — and set it in both places, `.env` and the azd environment:
+
+```env
+# .env
+MCP_SERVER_URL=https://<generated-id>-8931.<region>.devtunnels.ms/mcp
+```
+
+<!-- terminal -->
+```bash
+cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
+```
+
+Skipping the `azd env set` is the usual reason the agent keeps calling the real server: `azd` reads its own environment, not the repo's `.env`. Restart `azd ai agent run` afterwards. A temporary tunnel gets a new URL each time you host it, so redo that command whenever you restart it.
+
+> **`--allow-anonymous` is safe for this mock only.** It publishes an endpoint that authenticates nobody, which is fine here because the mock holds no data, has no managed identity, and invents every answer — there is nothing for a stranger to read or borrow. Don't reuse the flag for a server that fronts real data. In [Step 5](.workshop/docs/steps/05-rag.md) your Search MCP holds `Search Index Data Reader` over your destinations index; exposing *that* anonymously would publish read access to every document in it, to anyone with the URL, with no sign-in and no audit trail. A retrieval endpoint authenticates its callers with Entra ID — tunnelled or deployed.
+
+Switch back to `https://mcp.octotrip.app/flights/mcp` once the real server answers again.
 
 ### No MCP tools listed
 

@@ -20,6 +20,10 @@ still apply on top of everything here.
 - `.workshop/solutions/NN-*/` — the complete, runnable end state of step `NN`.
 - `.workshop/scripts/` — the advance/init/reset engine, the renderer, the
   linter, and the test suite (`tests/`).
+- `.workshop/mocks/` — standalone stand-ins for external services a step depends
+  on (e.g. the OctoTrip Flights MCP server), so a step still works when the real
+  service is down. Not part of the overlay; participants opt in from a step's
+  Troubleshooting section.
 - `.workshop_instance/` — per-instance runtime state (`.workshop-state.json`,
   `workshop_backups/`, `.workshop-initialized`). The engine writes and commits
   it; don't hand-edit it.
