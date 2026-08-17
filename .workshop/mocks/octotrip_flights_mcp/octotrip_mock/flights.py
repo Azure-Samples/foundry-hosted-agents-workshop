@@ -298,6 +298,9 @@ def _seeded_rng(query: SearchQuery, salt: str) -> random.Random:
     """Seed from the request so identical queries replay identical results.
 
     ``hash()`` is salted per process, so hash the request explicitly instead.
+    Currency and locale are left out on purpose: they only change how an
+    itinerary is presented, so switching them reprices the same flights instead
+    of returning a different set of them.
     """
     fingerprint = "|".join(
         [
@@ -309,7 +312,6 @@ def _seeded_rng(query: SearchQuery, salt: str) -> random.Random:
             str(query.children),
             str(query.infants),
             query.trip_class,
-            query.currency,
             salt,
         ]
     )
@@ -498,7 +500,7 @@ def _tag_offers(offers: list[dict[str, Any]]) -> None:
             tags.append("fastest")
         if offer["total_duration_minutes"] <= quickest * 1.25 and offer["price"] <= cheapest * 1.4:
             tags.append("convenient_ticket")
-        if offer["outbound"]["arrival_date"] != offer["outbound"]["departure_date"]:
+        if offer["outbound"]["arrival_date"] > offer["outbound"]["departure_date"]:
             tags.append("overnight")
         offer["tags"] = sorted(set(tags))
 
@@ -525,7 +527,9 @@ def search_flights(arguments: dict[str, Any], *, today: date | None = None) -> d
         offers.append(_build_offer(rng, query, stops))
 
     _tag_offers(offers)
-    offers.sort(key=lambda offer: (offer["stops"], offer["price"]))
+    # Flight numbers break price ties, so the order can't wobble when a
+    # currency conversion rounds two equal fares apart at the second decimal.
+    offers.sort(key=lambda offer: (offer["stops"], offer["price"], offer["flight_numbers"]))
 
     inventory_rng = _seeded_rng(query, "inventory")
     return {

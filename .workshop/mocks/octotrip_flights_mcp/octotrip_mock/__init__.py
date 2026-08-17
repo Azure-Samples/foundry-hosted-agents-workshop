@@ -35,5 +35,4 @@ __all__ = [
     "handle_http_request",
     "search_flights",
     "tool_properties_json",
-    "tool_properties_json",
 ]

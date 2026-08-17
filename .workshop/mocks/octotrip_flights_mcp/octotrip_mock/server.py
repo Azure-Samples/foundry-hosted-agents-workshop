@@ -21,7 +21,9 @@ SERVER_VERSION = "1.0.0"
 SUPPORTED_PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 DEFAULT_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
 
-MCP_PATHS = ("/mcp", "/")
+# "/flights/mcp" is the real server's path: accepting it means swapping only the
+# host of an existing MCP_SERVER_URL points at the mock without a 404.
+MCP_PATHS = ("/mcp", "/flights/mcp", "/")
 HEALTH_PATH = "/health"
 
 SERVER_INSTRUCTIONS = (

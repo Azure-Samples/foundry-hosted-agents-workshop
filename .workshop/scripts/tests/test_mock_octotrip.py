@@ -224,7 +224,6 @@ def test_currency_is_applied_to_prices():
     assert dollars["results"][0]["currency"] == "USD"
     assert dollars["results"][0]["price"] > euros["results"][0]["price"]
 
-
 @pytest.mark.parametrize(
     ("arguments", "expected_code"),
     [
@@ -297,6 +296,65 @@ def test_fractional_passenger_counts_are_rejected():
 
     assert is_error is True
     assert payload["error"]["code"] == "invalid_request"
+
+
+def test_changing_currency_reprices_the_same_flights():
+    """Currency is presentation, so it must not shuffle the itineraries."""
+    base = {"origin": "FRA", "destination": "MAD", "departure_date": _future(20)}
+
+    euros, _ = _call_search({**base, "currency": "EUR"})
+    dollars, _ = _call_search({**base, "currency": "USD"})
+
+    assert [offer["flight_numbers"] for offer in euros["results"]] == [
+        offer["flight_numbers"] for offer in dollars["results"]
+    ]
+    # Same flights, so the rate alone decides the price -- no random spread to
+    # swamp it, whatever today's date happens to seed.
+    for euro_offer, dollar_offer in zip(euros["results"], dollars["results"]):
+        assert dollar_offer["price"] > euro_offer["price"]
+
+
+def test_time_zones_come_from_the_table_not_from_longitude():
+    """Political time zones don't follow meridians; the workshop's cities prove it."""
+    assert AIRPORTS["KEF"].utc_offset_hours == 0  # Iceland sits at -22 degrees
+    assert AIRPORTS["RAK"].utc_offset_hours == 1  # Morocco at -8 degrees
+    assert AIRPORTS["LIS"].utc_offset_hours == 0
+    assert AIRPORTS["CDG"].utc_offset_hours == 1
+
+
+def test_offsets_stay_within_a_few_hours_of_solar_time():
+    """Catches a typo'd offset: no real zone is far from its own longitude."""
+    for airport in AIRPORTS.values():
+        solar = airport.longitude / 15.0
+        assert abs(airport.utc_offset_hours - solar) <= 3.5, airport.iata
+
+
+def test_overnight_tags_only_flights_that_land_on_a_later_date():
+    """Eastbound trans-Pacific can land an earlier date -- that isn't overnight."""
+    payload, is_error = _call_search(
+        {"origin": "HND", "destination": "YVR", "departure_date": _future(20)}
+    )
+
+    assert is_error is False
+    for offer in payload["results"]:
+        if "overnight" in offer["tags"]:
+            assert offer["outbound"]["arrival_date"] > offer["outbound"]["departure_date"]
+
+
+def test_partial_words_do_not_resolve_to_an_airport():
+    """'port' is in every '... Airport' name and must not pick one."""
+    with pytest.raises(MockToolError) as excinfo:
+        resolve_airport("port", "origin")
+    assert excinfo.value.code in {"airport_not_found", "disambiguation_needed"}
+
+
+def test_the_real_servers_path_is_accepted_too():
+    """Swapping only the host of an existing MCP_SERVER_URL must not 404."""
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode("utf-8")
+    result = handle_http_request("POST", "/flights/mcp", "application/json", body)
+
+    assert result.status == 200
+    assert json.loads(result.body)["result"]["tools"][0]["name"] == "search"
 
 
 def test_tool_properties_match_the_mcp_trigger_contract() -> None:

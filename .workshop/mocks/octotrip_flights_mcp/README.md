@@ -18,8 +18,9 @@ answer from them:
 
 - **Real airport coordinates** (60+ airports) give real great-circle distances,
   so flight durations and local departure/arrival times — including next-day
-  arrivals across time zones — come out right. Local times are approximated from
-  longitude, so they ignore DST and the odd civil time zone.
+  arrivals across time zones — come out right. Each airport carries its real
+  standard-time UTC offset, so the mock has no DST and rounds the half-hour
+  zones (India, and friends) to the nearest hour.
 - **Connections** are picked from a global hub list, preferring hubs near the
   midpoint of the route. Short hops are non-stop or nothing; no non-stop is
   offered beyond 13 500 km.
@@ -45,6 +46,8 @@ python .workshop/mocks/octotrip_flights_mcp/serve_local.py
 ```
 
 The MCP endpoint is `http://127.0.0.1:8931/mcp` (health probe at `/health`).
+The real server's path, `/flights/mcp`, is accepted too, so swapping just the
+host of an existing `MCP_SERVER_URL` works.
 Use `--host` / `--port` to change the binding.
 
 Quick check:

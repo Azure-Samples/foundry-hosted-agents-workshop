@@ -1,8 +1,15 @@
 """The ``search`` tool contract, shared by both hosts.
 
 Keeping the schema in one place means the dependency-free local server and the
-Azure Functions MCP tool trigger advertise exactly the same tool, with the same
+Azure Functions MCP tool trigger advertise the same tool, with the same
 parameters and the same error behaviour.
+
+One deliberate gap: the Functions trigger's ``toolProperties`` carry only name,
+type, description and required, so the ``enum``, ``minimum``, ``maximum`` and
+defaults below are advertised by the local server but not by the Functions host.
+Behaviour is unchanged either way -- ``_normalize`` in ``flights.py`` enforces
+all of them server-side and returns an ``invalid_request`` error, so the model
+gets told off rather than silently accepting a bad value.
 """
 
 from __future__ import annotations
