@@ -29,7 +29,8 @@ from octotrip_mock import (  # noqa: E402
     search_flights,
     tool_properties_json,
 )
-from octotrip_mock.airports import AIRPORTS, resolve_airport  # noqa: E402
+from octotrip_mock.airports import AIRPORTS, distance_km, resolve_airport  # noqa: E402
+from octotrip_mock.flights import MAX_DETOUR_FACTOR, MAX_DETOUR_SLACK_KM  # noqa: E402
 from octotrip_mock.server import DEFAULT_PROTOCOL_VERSION  # noqa: E402
 
 JSON_ACCEPT = "application/json"
@@ -331,14 +332,97 @@ def test_offsets_stay_within_a_few_hours_of_solar_time():
 
 def test_overnight_tags_only_flights_that_land_on_a_later_date():
     """Eastbound trans-Pacific can land an earlier date -- that isn't overnight."""
+    tagged = 0
+    for origin, destination in (("HND", "YVR"), ("JFK", "LHR"), ("LIS", "SYD"), ("SFO", "SIN")):
+        for days in (10, 40, 90):
+            payload, is_error = _call_search(
+                {"origin": origin, "destination": destination, "departure_date": _future(days)}
+            )
+            assert is_error is False
+            for offer in payload["results"]:
+                overnight = "overnight" in offer["tags"]
+                lands_later = (
+                    offer["outbound"]["arrival_date"] > offer["outbound"]["departure_date"]
+                )
+                assert overnight == lands_later
+                tagged += overnight
+
+    # Without this the assertion above would pass on a set of offers that never
+    # earns the tag at all.
+    assert tagged > 0
+
+
+def test_connections_do_not_zig_zag_across_the_planet():
+    """A hub set is only worth offering if the whole path stays near the route."""
+    for origin, destination in (("SYD", "AKL"), ("LIS", "RAK"), ("JFK", "LAX"), ("LHR", "CPT")):
+        payload, is_error = _call_search(
+            {"origin": origin, "destination": destination, "departure_date": _future(25)}
+        )
+        assert is_error is False
+        direct = distance_km(AIRPORTS[origin], AIRPORTS[destination])
+        for offer in payload["results"]:
+            legs = offer["outbound"]["legs"]
+            points = [leg["departure"] for leg in legs] + [legs[-1]["arrival"]]
+            flown = sum(
+                distance_km(AIRPORTS[a], AIRPORTS[b]) for a, b in zip(points, points[1:])
+            )
+            assert flown <= direct * MAX_DETOUR_FACTOR + MAX_DETOUR_SLACK_KM, points
+
+
+def test_same_day_return_never_departs_before_the_outbound_lands():
+    """You cannot take off for home before you have landed."""
+    for days in (5, 15, 25, 35, 45, 55):
+        day = _future(days)
+        payload, is_error = _call_search(
+            {"origin": "FRA", "destination": "MAD", "departure_date": day, "return_date": day}
+        )
+        assert is_error is False
+        for offer in payload["results"]:
+            assert offer["return"]["departure_time"] > offer["outbound"]["arrival_time"]
+
+
+def test_same_day_return_is_refused_when_the_trip_is_too_long():
+    """Sydney and back before midnight isn't a flight, it's a fantasy."""
+    day = _future(30)
     payload, is_error = _call_search(
-        {"origin": "HND", "destination": "YVR", "departure_date": _future(20)}
+        {"origin": "LIS", "destination": "SYD", "departure_date": day, "return_date": day}
     )
 
-    assert is_error is False
-    for offer in payload["results"]:
-        if "overnight" in offer["tags"]:
-            assert offer["outbound"]["arrival_date"] > offer["outbound"]["departure_date"]
+    assert is_error is True
+    assert payload["error"]["code"] == "no_results"
+    assert payload["error"]["field"] == "return_date"
+
+
+def test_total_available_does_not_advertise_flights_that_do_not_exist():
+    """A bigger number here reads as withheld results the mock cannot produce."""
+    payload, _ = _call_search({"origin": "LIS", "destination": "RAK", "departure_date": "tomorrow"})
+
+    assert payload["total_available"] == payload["total"] == len(payload["results"])
+
+
+def test_an_explicit_null_id_is_answered_rather_than_swallowed():
+    """JSON-RPC: "id": null is a request; only a missing id is a notification."""
+    body = json.dumps({"jsonrpc": "2.0", "id": None, "method": "tools/list"}).encode("utf-8")
+    result = handle_http_request("POST", "/mcp", "application/json", body)
+
+    assert result.status == 200
+    assert json.loads(result.body)["id"] is None
+
+
+def test_an_empty_batch_is_an_invalid_request():
+    result = handle_http_request("POST", "/mcp", "application/json", b"[]")
+
+    assert result.status == 400
+    assert json.loads(result.body)["error"]["code"] == -32600
+
+
+def test_head_on_the_health_probe_matches_get():
+    """All three hosts should agree that a health probe answers HEAD."""
+    head = handle_http_request("HEAD", "/health")
+    get = handle_http_request("GET", "/health")
+
+    assert head.status == get.status == 200
+    assert handle_http_request("POST", "/health").headers["Allow"] == "GET, HEAD"
 
 
 def test_partial_words_do_not_resolve_to_an_airport():

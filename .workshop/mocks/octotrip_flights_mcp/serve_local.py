@@ -71,11 +71,15 @@ class MockMcpHandler(BaseHTTPRequestHandler):
             self.send_header(name, value)
         self.send_header("Content-Length", str(len(result.body)))
         self.end_headers()
-        if result.body:
+        # HEAD gets the headers a GET would produce, and no body.
+        if result.body and method != "HEAD":
             self.wfile.write(result.body)
 
     def do_GET(self) -> None:  # noqa: N802 - http.server naming
         self._dispatch("GET")
+
+    def do_HEAD(self) -> None:  # noqa: N802 - http.server naming
+        self._dispatch("HEAD")
 
     def do_POST(self) -> None:  # noqa: N802 - http.server naming
         self._dispatch("POST")

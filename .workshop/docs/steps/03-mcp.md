@@ -319,22 +319,20 @@ devtunnel host --port-number 8931 --allow-anonymous
 
 For something that outlives your terminal, deploy it: the same folder is an Azure Functions app with anonymous access, and its [README](.workshop/mocks/octotrip_flights_mcp/README.md) has the `az` commands.
 
-Either way, append `/mcp` to the URL and set it in all three places — `.env`, the azd environment, and the manifest:
+Either way, append `/mcp` to the URL. Only `MCP_SERVER_URL` changes — leave `MCP_SERVER_LABEL` alone — and set it in both places, `.env` and the azd environment:
 
 ```env
 # .env
-MCP_SERVER_LABEL=octotrip_flights_mock
 MCP_SERVER_URL=https://<generated-id>-8931.<region>.devtunnels.ms/mcp
 ```
 
 <!-- terminal -->
 ```bash
 cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-azd env set MCP_SERVER_LABEL "$MCP_SERVER_LABEL"
 azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
 ```
 
-Skipping the `azd env set` pair is the usual reason the agent keeps calling the real server: `azd` reads its own environment, not the repo's `.env`. Restart `azd ai agent run` afterwards. A temporary tunnel gets a new URL each time you host it, so redo those two commands whenever you restart it.
+Skipping the `azd env set` is the usual reason the agent keeps calling the real server: `azd` reads its own environment, not the repo's `.env`. Restart `azd ai agent run` afterwards. A temporary tunnel gets a new URL each time you host it, so redo that command whenever you restart it.
 
 > **`--allow-anonymous` is safe for this mock only.** It publishes an endpoint that authenticates nobody, which is fine here because the mock holds no data, has no managed identity, and invents every answer — there is nothing for a stranger to read or borrow. Don't reuse the flag for a server that fronts real data. In [Step 5](.workshop/docs/steps/05-rag.md) your Search MCP holds `Search Index Data Reader` over your destinations index; exposing *that* anonymously would publish read access to every document in it, to anyone with the URL, with no sign-in and no audit trail. A retrieval endpoint authenticates its callers with Entra ID — tunnelled or deployed.
 

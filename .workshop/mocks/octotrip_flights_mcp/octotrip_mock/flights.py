@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import random
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from .airports import HUBS, AIRPORTS, Airport, distance_km, resolve_airport
@@ -106,6 +106,17 @@ MAX_NONSTOP_KM = 13_500.0
 
 # Below this one, nobody would connect: short hops are non-stop or nothing.
 MIN_CONNECTION_KM = 600.0
+
+# A connection is allowed to add a dogleg, but not an absurd one. The cap is a
+# multiplier plus a slack term, so a short route can detour to a nearby hub
+# while a long one stays roughly on the great circle. Without it, scoring hubs
+# one at a time sent Sydney -> Auckland via Hong Kong *and* Bangkok: an 8.6x
+# detour. When no hub set fits, the offer quietly comes back with fewer stops.
+MAX_DETOUR_FACTOR = 1.4
+MAX_DETOUR_SLACK_KM = 800.0
+
+# Ground time between landing and taking off again on a same-day return trip.
+MIN_TURNAROUND_MINUTES = 120
 
 # Airlines load schedules about a year out; this also keeps next-day arrival
 # arithmetic clear of date.max.
@@ -324,14 +335,24 @@ def _flight_minutes(kilometres: float) -> int:
     return int(round(30 + kilometres / 13.0))
 
 
+def _path_km(route: list[Airport]) -> float:
+    """Great-circle length of a whole multi-leg route."""
+    return sum(distance_km(a, b) for a, b in zip(route, route[1:]))
+
+
 def _pick_hubs(rng: random.Random, query: SearchQuery, count: int) -> list[Airport]:
     """Choose connecting airports that keep the itinerary geographically sane.
 
     Candidates are scored on how much detour they add, plus a penalty for
     splitting the trip unevenly — that keeps a long-haul connection near the
     middle of the route instead of one hop from the destination.
+
+    Scoring one hub at a time says nothing about how a *pair* of them combines,
+    so the chosen set is measured end to end against the detour cap. If it
+    doesn't fit, drop a stop and try again rather than sell a zig-zag.
     """
     direct = distance_km(query.origin, query.destination)
+    max_path = direct * MAX_DETOUR_FACTOR + MAX_DETOUR_SLACK_KM
     excluded = {query.origin.iata, query.destination.iata}
     candidates = [AIRPORTS[code] for code in HUBS if code not in excluded]
 
@@ -342,9 +363,14 @@ def _pick_hubs(rng: random.Random, query: SearchQuery, count: int) -> list[Airpo
 
     candidates.sort(key=score)
     shortlist = candidates[: max(count + 3, 5)]
-    chosen = rng.sample(shortlist, count)
-    chosen.sort(key=lambda hub: distance_km(query.origin, hub))
-    return chosen
+
+    while count > 0:
+        chosen = rng.sample(shortlist, count)
+        chosen.sort(key=lambda hub: distance_km(query.origin, hub))
+        if _path_km([query.origin, *chosen, query.destination]) <= max_path:
+            return chosen
+        count -= 1
+    return []
 
 
 def _aircraft(rng: random.Random, kilometres: float) -> str:
@@ -429,11 +455,15 @@ def _price(rng: random.Random, query: SearchQuery, kilometres: float, stops: int
     return round(total_eur * CURRENCY_RATES[query.currency], 2)
 
 
-def _build_offer(rng: random.Random, query: SearchQuery, stops: int) -> dict[str, Any]:
+def _build_offer(rng: random.Random, query: SearchQuery, stops: int) -> dict[str, Any] | None:
+    """Build one offer, or ``None`` if the itinerary can't be flown as asked."""
     airline = rng.choice(AIRLINES)
     airline_name, airline_code, alliance = airline
 
     hubs = _pick_hubs(rng, query, stops) if stops else []
+    # The detour cap may have handed back fewer hubs than requested, so the
+    # route decides the stop count -- not the other way round.
+    stops = len(hubs)
     outbound_route = [query.origin, *hubs, query.destination]
     departure_hour = rng.choice([6, 7, 8, 9, 10, 12, 14, 15, 17, 18, 20, 21])
     departure_minute = rng.choice([0, 5, 10, 15, 25, 30, 40, 45, 50])
@@ -445,13 +475,28 @@ def _build_offer(rng: random.Random, query: SearchQuery, stops: int) -> dict[str
     inbound: dict[str, Any] | None = None
     total_minutes = outbound_minutes
     if query.return_date is not None:
+        if query.return_date == query.departure_date:
+            # Flying home the same day: you can't take off before you land.
+            landing = datetime.combine(
+                date.fromisoformat(outbound["arrival_date"]),
+                time.fromisoformat(outbound["arrival_time"]),
+            )
+            back = landing + timedelta(minutes=MIN_TURNAROUND_MINUTES)
+            if back.date() > query.return_date:
+                # Too far to get there and back before the day runs out.
+                return None
+            return_hour, return_minute = back.hour, back.minute
+        else:
+            return_hour = rng.choice([7, 9, 11, 13, 16, 19, 22])
+            return_minute = rng.choice([0, 10, 20, 35, 45, 55])
+
         inbound, inbound_minutes = _build_journey(
             rng,
             list(reversed(outbound_route)),
             query.return_date,
             airline,
-            rng.choice([7, 9, 11, 13, 16, 19, 22]),
-            rng.choice([0, 10, 20, 35, 45, 55]),
+            return_hour,
+            return_minute,
         )
         total_minutes += inbound_minutes
 
@@ -524,18 +569,33 @@ def search_flights(arguments: dict[str, Any], *, today: date | None = None) -> d
     offers: list[dict[str, Any]] = []
     for index, stops in enumerate(plan):
         rng = _seeded_rng(query, f"offer-{index}-{stops}")
-        offers.append(_build_offer(rng, query, stops))
+        offer = _build_offer(rng, query, stops)
+        if offer is not None:
+            offers.append(offer)
+
+    if not offers:
+        raise MockToolError(
+            code="no_results",
+            message=(
+                f"No same-day return is possible between {query.origin.iata} and "
+                f"{query.destination.iata}: the outbound lands too late to fly back."
+            ),
+            suggestion="Ask for a later return_date, or drop it for a one-way search.",
+            details={"field": "return_date"},
+        )
 
     _tag_offers(offers)
     # Flight numbers break price ties, so the order can't wobble when a
     # currency conversion rounds two equal fares apart at the second decimal.
     offers.sort(key=lambda offer: (offer["stops"], offer["price"], offer["flight_numbers"]))
 
-    inventory_rng = _seeded_rng(query, "inventory")
     return {
         "results": offers,
         "total": len(offers),
-        "total_available": inventory_rng.randint(180, 1450),
+        # The mock never withholds results, so there is nothing more to page
+        # through. Reporting a bigger inventory would invite the model to tell
+        # the user about hundreds of flights that don't exist.
+        "total_available": len(offers),
         "origin_resolved": query.origin.as_resolved(),
         "destination_resolved": query.destination.as_resolved(),
         "distance_km": round(kilometres),

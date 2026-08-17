@@ -106,8 +106,10 @@ def handle_message(message: Any) -> dict[str, Any] | None:
     if method is None:
         # A response to a server-initiated request; nothing for us to do.
         return None
-    if request_id is None:
+    if "id" not in message:
         # Notification (e.g. notifications/initialized): acknowledge silently.
+        # An explicit "id": null is a request, not a notification, so it is the
+        # absent key -- not the None value -- that decides.
         return None
 
     if method == "initialize":
@@ -152,6 +154,13 @@ def _handle_post(body: bytes, accept: str | None) -> HttpResult:
             headers={"Content-Type": "application/json"},
         )
 
+    if isinstance(message, list) and not message:
+        return HttpResult(
+            status=400,
+            body=_json_bytes(_error(None, -32600, "Invalid Request: empty batch.")),
+            headers={"Content-Type": "application/json"},
+        )
+
     batch = message if isinstance(message, list) else [message]
     responses = [response for response in (handle_message(item) for item in batch) if response is not None]
 
@@ -182,7 +191,7 @@ def handle_http_request(
 
     if normalized_path == HEALTH_PATH:
         if method not in ("GET", "HEAD"):
-            return HttpResult(status=405, headers={"Allow": "GET"})
+            return HttpResult(status=405, headers={"Allow": "GET, HEAD"})
         payload = {"status": "ok", "server": SERVER_NAME, "version": SERVER_VERSION, "mock": True}
         return HttpResult(status=200, body=_json_bytes(payload), headers={"Content-Type": "application/json"})
 

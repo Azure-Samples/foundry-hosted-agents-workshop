@@ -89,8 +89,8 @@ def search(
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-@app.route(route="health", methods=["GET"])
+@app.route(route="health", methods=["GET", "HEAD"])
 def health(req: func.HttpRequest) -> func.HttpResponse:
     """Liveness probe, handy right after a deployment."""
-    result = handle_http_request(method="GET", path="/health")
+    result = handle_http_request(method=req.method, path="/health")
     return func.HttpResponse(body=result.body, status_code=result.status, headers=result.headers)

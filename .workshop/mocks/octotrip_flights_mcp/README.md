@@ -22,8 +22,10 @@ answer from them:
   standard-time UTC offset, so the mock has no DST and rounds the half-hour
   zones (India, and friends) to the nearest hour.
 - **Connections** are picked from a global hub list, preferring hubs near the
-  midpoint of the route. Short hops are non-stop or nothing; no non-stop is
-  offered beyond 13 500 km.
+  midpoint of the route, and the whole path is measured so a connection can't
+  zig-zag. Short hops are non-stop or nothing; no non-stop is offered beyond
+  13 500 km; and a same-day return only exists if the outbound lands in time to
+  fly home again.
 - **Prices** scale with distance, stops, cabin class, one-way vs round trip,
   passenger mix, and currency.
 - **The same request always returns the same offers.** The random seed is a
@@ -88,25 +90,23 @@ That hosts a temporary tunnel and prints a public HTTPS URL. Two flags matter:
   name like `octotrip-mock` fails for everyone but the first person to claim it.
   A temporary tunnel gets a generated ID and disappears when you stop hosting.
 
-Append `/mcp` to the URL it prints, then point Step 3 at it — in `.env`, in the
-azd environment, and in the manifest:
+Append `/mcp` to the URL it prints, then point Step 3 at it. Only the URL
+changes — `MCP_SERVER_LABEL` stays whatever Step 3 set:
 
 ```env
 # .env
-MCP_SERVER_LABEL=octotrip_flights_mock
 MCP_SERVER_URL=https://<generated-id>-8931.<region>.devtunnels.ms/mcp
 ```
 
 ```bash
 cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-azd env set MCP_SERVER_LABEL "$MCP_SERVER_LABEL"
 azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
 ```
 
 `azd` reads its own environment, not the repo's `.env`, so skipping the
-`azd env set` pair leaves your agent calling the real OctoTrip server. Mirror
-both names in `agent.manifest.yaml` under `template.environment_variables` too,
-exactly as Step 3 describes, then restart `azd ai agent run` (or redeploy) so the
+`azd env set` leaves your agent calling the real OctoTrip server. Step 3 already
+wired both names into `agent.manifest.yaml` under `template.environment_variables`,
+so nothing to change there — just restart `azd ai agent run` (or redeploy) so the
 agent picks up the new URL.
 
 The URL changes every time you host a fresh temporary tunnel, so redo those two
@@ -266,17 +266,18 @@ working anonymous endpoint in the meantime.
 
 Local runs never ask for a key, whichever level you set.
 
-Point Step 3 at the deployed app — `.env`, the azd environment, and the manifest,
-the same three places as the tunnel:
+Point Step 3 at the deployed app — `.env` and the azd environment, the same two
+places as the tunnel, and again only the URL changes:
 
 ```env
 # .env
-MCP_SERVER_LABEL=octotrip_flights_mock
 MCP_SERVER_URL=https://<app>.azurewebsites.net/runtime/webhooks/mcp
 ```
 
-Mirror both values in `agent.manifest.yaml` under `template.environment_variables`,
-exactly as Step 3 describes for the real server.
+```bash
+cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
+```
 
 ## Layout
 
