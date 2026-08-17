@@ -14,7 +14,20 @@ description: >
   hosted as one agent via workflow.as_agent(); an optional human-approval gate uses
   the request/response (request_info) pattern.
 metadata:
-  tags: [Agent Framework, AI Agent Hosting, Azure AI AgentServer, Responses Protocol, Travel Assistant, Function Tools, MCP Tools, Toolbox Tools, RAG, Skills, Foundry Skills, Multi-Agent, Workflows]
+  tags:
+    - Agent Framework
+    - AI Agent Hosting
+    - Azure AI AgentServer
+    - Responses Protocol
+    - Travel Assistant
+    - Function Tools
+    - MCP Tools
+    - Toolbox Tools
+    - RAG
+    - Skills
+    - Foundry Skills
+    - Multi-Agent
+    - Workflows
   tool_declarations:
     - name: get_weather
       description: Returns mock destination weather for a city and optional date.

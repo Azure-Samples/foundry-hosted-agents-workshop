@@ -16,7 +16,21 @@ description: >
   FoundryMemoryProvider, so durable per-user preferences are recalled and updated
   across conversations.
 metadata:
-  tags: [Agent Framework, AI Agent Hosting, Azure AI AgentServer, Responses Protocol, Travel Assistant, Function Tools, MCP Tools, Toolbox Tools, RAG, Skills, Foundry Skills, Multi-Agent, Workflows, Memory]
+  tags:
+    - Agent Framework
+    - AI Agent Hosting
+    - Azure AI AgentServer
+    - Responses Protocol
+    - Travel Assistant
+    - Function Tools
+    - MCP Tools
+    - Toolbox Tools
+    - RAG
+    - Skills
+    - Foundry Skills
+    - Multi-Agent
+    - Workflows
+    - Memory
   tool_declarations:
     - name: get_weather
       description: Returns mock destination weather for a city and optional date.

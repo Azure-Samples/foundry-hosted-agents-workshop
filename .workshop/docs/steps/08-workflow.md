@@ -237,7 +237,19 @@ Metadata-only: append the `Workflows` tag, update the `description`, and add a `
 ```yaml
 # travel_assistant/agent.manifest.yaml (delta)
 metadata:
-  tags: [Agent Framework, AI Agent Hosting, Azure AI AgentServer, Responses Protocol, Travel Assistant, Function Tools, MCP Tools, Toolbox Tools, RAG, Skills, Multi-Agent, Workflows]
+  tags:
+    - Agent Framework
+    - AI Agent Hosting
+    - Azure AI AgentServer
+    - Responses Protocol
+    - Travel Assistant
+    - Function Tools
+    - MCP Tools
+    - Toolbox Tools
+    - RAG
+    - Skills
+    - Multi-Agent
+    - Workflows
   workflow:
     start: gather_preferences
     executors: [gather_preferences, flights, hotels, activities, consolidate, finalize_itinerary]
