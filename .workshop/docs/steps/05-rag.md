@@ -771,7 +771,7 @@ Keep it keyless, on **both** sides of the server. Outbound, it authenticates to 
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/05-rag/`](.workshop/solutions/05-rag/)
+> If you get stuck: [`.workshop/solutions/05-rag/`](../../solutions/05-rag/)
 
 ## Upstream sample
 

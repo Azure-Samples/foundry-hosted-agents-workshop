@@ -144,3 +144,100 @@ def test_step_body_owner_repo_substitution(tmp_path, monkeypatch):
     assert "{{REPO}}" not in output
     assert "{{CURRENT_STEP}}" not in output
     assert "github.com/alice/proj/actions/workflows/advance-step.yml?expected_current_step=0" in output
+
+
+STEPS_BASE = ".workshop/docs/steps"
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("../a", True),
+        ("00-intro.md", True),
+        ("../../solutions/01-basic/", True),
+        ("https://example.com/x", False),
+        ("http://example.com/x", False),
+        ("mailto:a@b.com", False),
+        ("//cdn.example.com/x", False),
+        ("#section", False),
+        ("/etc/hosts", False),
+        ("{{OWNER}}/x", False),
+    ],
+)
+def test_is_rebasable_url(url, expected):
+    assert render_readme.is_rebasable_url(url) is expected
+
+
+def test_rebase_relative_link_target():
+    text = "[solution](../../solutions/01-basic/)"
+    out = render_readme.rebase_relative_links(text, base_dir=STEPS_BASE)
+    assert out == "[solution](.workshop/solutions/01-basic/)"
+
+
+def test_rebase_relative_image_target():
+    text = "![alt](../assets/01-agent-inspector.png)"
+    out = render_readme.rebase_relative_links(text, base_dir=STEPS_BASE)
+    assert out == "![alt](.workshop/docs/assets/01-agent-inspector.png)"
+
+
+def test_rebase_preserves_anchor_on_sibling_file():
+    text = "[intro](00-intro.md#troubleshooting)"
+    out = render_readme.rebase_relative_links(text, base_dir=STEPS_BASE)
+    assert out == "[intro](.workshop/docs/steps/00-intro.md#troubleshooting)"
+
+
+def test_rebase_preserves_link_title():
+    text = '![alt](../assets/x.png "a caption")'
+    out = render_readme.rebase_relative_links(text, base_dir=STEPS_BASE)
+    assert out == '![alt](.workshop/docs/assets/x.png "a caption")'
+
+
+def test_rebase_passes_absolute_urls_through():
+    text = "[docs](https://example.com/a) and [x](http://example.com/b)"
+    out = render_readme.rebase_relative_links(text, base_dir=STEPS_BASE)
+    assert out == text
+
+
+def test_rebase_passes_anchor_and_placeholder_through():
+    text = "[top](#section) [ci](https://github.com/{{OWNER}}/{{REPO}}/actions)"
+    out = render_readme.rebase_relative_links(text, base_dir=STEPS_BASE)
+    assert out == text
+
+
+def test_rebase_from_partials_base():
+    text = "[intro](../steps/00-intro.md#troubleshooting)"
+    out = render_readme.rebase_relative_links(text, base_dir=".workshop/docs/partials")
+    assert out == "[intro](.workshop/docs/steps/00-intro.md#troubleshooting)"
+
+
+def test_resolve_relative_target_strips_fragment():
+    target = render_readme.resolve_relative_target(
+        "00-intro.md#troubleshooting", STEPS_BASE
+    )
+    assert target == ".workshop/docs/steps/00-intro.md"
+
+
+def test_resolve_relative_target_returns_none_for_non_relative():
+    assert render_readme.resolve_relative_target("https://x/y", STEPS_BASE) is None
+    assert render_readme.resolve_relative_target("#anchor", STEPS_BASE) is None
+
+
+def test_render_rebases_source_relative_links_in_body(tmp_path, monkeypatch):
+    """Source-relative links in a step body become repo-root-relative in output."""
+    steps_dir = tmp_path / "steps"
+    steps_dir.mkdir(parents=True)
+    (steps_dir / "04-half.md").write_text(
+        "<!-- step: 4 -->\n\n"
+        "See [`solution`](../../solutions/04-toolbox/) and "
+        "![shot](../assets/04-toolbox-toolkit.png).\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(render_readme, "STEPS_DIR", steps_dir)
+
+    output = render_readme.render(4, owner="foo", repo="bar")
+
+    assert "](.workshop/solutions/04-toolbox/)" in output
+    assert "](.workshop/docs/assets/04-toolbox-toolkit.png)" in output
+    assert "../../solutions" not in output
+    assert "](../assets/" not in output
+
