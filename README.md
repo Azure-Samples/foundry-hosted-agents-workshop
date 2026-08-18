@@ -2,16 +2,16 @@
 
 Built on the upstream [foundry-samples](https://github.com/microsoft-foundry/foundry-samples/tree/main/samples/python/hosted-agents/agent-framework/responses).
 
-> **Progress:** Step `01` of `9` — **Basic hosted agent**  
-> ▰▱▱▱▱▱▱▱▱▱
+> **Progress:** Step `00` of `9` — **Setup**  
+> ▱▱▱▱▱▱▱▱▱▱
 
-<!-- step: 01 -->
+<!-- step: 00 -->
 
 <details>
 <summary>Workshop map</summary>
 
-- Step 00 — Setup ✅
-- **Step 01 — Basic hosted agent**
+- **Step 00 — Setup**
+- Step 01 — Basic hosted agent
 - Step 02 — Function tools
 - Step 03 — MCP integration
 - Step 04 — Foundry Toolbox
@@ -27,316 +27,388 @@ Built on the upstream [foundry-samples](https://github.com/microsoft-foundry/fou
 If something looks broken see [Troubleshooting](.workshop/docs/steps/00-intro.md#troubleshooting).
 
 
-# Step 1 — Your first hosted agent: TravelBuddy
+> **Welcome — start here.** Step 0 has no agent code. It introduces the workshop, walks you through creating your own copy of the repository, and gets your local toolchain ready so Step 1 can jump straight into building the first agent.
 
-> **Goal:** stand up a hosted Foundry agent that can hold a basic travel conversation.
+## What this workshop is about
 
-## What you'll learn
+You will build a **travel assistant** that grows one capability at a time. Starting from a single hosted Foundry agent, by step 9 it will be a multi-agent travel planner with function tools, MCP integration, retrieval-augmented generation, durable workflows, and persistent memory.
 
-- What a Foundry **hosted agent** is and how the Agent Framework talks to it
-- How `DefaultAzureCredential` flows from `az login` to the agent client
-- The minimum agent.yaml / agent.manifest.yaml needed to ship an agent
+The workshop is built on top of the upstream [foundry-samples](https://github.com/microsoft-foundry/foundry-samples/tree/main/samples/python/hosted-agents/agent-framework/responses) and is delivered as a **GitHub template repository**: you don't edit this repo directly — you create your own copy, then advance one step at a time. Each advance rewrites the `README.md` to show the next step in place.
 
-## What's already in the repo
+## Create your own repo from this template
 
-- `travel_assistant/requirements.txt` — the Python packages for the Step 1 agent.
-- `travel_assistant/agent.yaml` — the hosted-agent runtime definition. It's ready to run; you'll read it to understand each part.
-- `travel_assistant/agent.manifest.yaml` — the deployment/template manifest. It's provided complete; you'll read it to see what it declares.
-- `travel_assistant/main.py` — the Python entry point. You'll write TravelBuddy's instructions.
-- `travel_assistant/Dockerfile` — how your agent is packaged into the container image Foundry runs. Provided complete; you'll read it.
-- `travel_assistant/.dockerignore` — keeps build junk and local secrets (`.env`) out of that image.
-- `travel_assistant/.azdignore` — tells `azd` which files *not* to upload when it packages the deployment.
+This is a **GitHub template repository**. You must create your own copy before doing anything else.
 
-In this step you **complete** the one small edit called out below (TravelBuddy's instructions in `main.py`) — you don't create the files from scratch, and the two YAML files are ready to use as-is. The workshop is **incremental**: when you advance, the next step's files are laid on top of your `travel_assistant/` folder. Files from earlier steps that the next step doesn't touch stay exactly as they are — nothing is deleted. Files the next step ships (for example an updated `main.py`) are refreshed to that step's version, and your current work is backed up under `.workshop_instance/workshop_backups/step-<N>/` first, so you can always recover your own wording.
+1. Click the green **"Use this template"** button at the top of this page → **Create a new repository**.
+2. Pick a name and owner, choose visibility (Public or Private), and click **Create repository**.
+3. The included **Initialize workshop** Action runs automatically on the first push to your new repo. It lays down the step 0 starter files into `travel_assistant/` and substitutes your owner/repo into the README's Action URLs. Wait for it to finish in the **Actions** tab of your new repo (\~30 seconds). If you don't see a run, your org may have Actions disabled by default — enable them under **Settings → Actions → General → Allow all actions**, then click **Actions → Initialize workshop → Run workflow** to run it manually. See the **"▶ Start the workshop returns 404"** entry under Troubleshooting below for the full recovery procedure.
+4. **Repo settings:** Settings → Actions → General → Workflow permissions → **Read and write permissions**. Most repos inherit this, but org-owned repos may need it set explicitly so the workshop Actions can push.
 
-> **Before you start:** make sure you completed the setup in Step 0 — [Install the tools you'll need](.workshop/docs/steps/00-intro.md#install-the-tools-youll-need) and [Set up your local environment](.workshop/docs/steps/00-intro.md#set-up-your-local-environment-one-time). If `python .workshop/scripts/preflight.py --step 1` is green, you're ready.
+> 💡 **Already in your own copy?** If the green button at the top reads "Open" rather than "Use this template", you're already in a workshop instance. Continue below.
 
-## Concept (5-min read)
+## Open your repo
 
-**Azure AI Foundry** (the Learn docs now call the new experience **Microsoft Foundry**) is the Azure platform for building, deploying, and managing AI apps and agents. It gives you a portal, SDKs, model catalog, model deployments, agent tooling, tracing, evaluation, and access controls in one place, instead of making every app assemble those pieces by hand.
+Pick one of the two paths — the rest of the workshop works the same either way.
 
-A **Foundry project** is the workspace boundary for one app, prototype, or team. It holds the things your code needs at runtime: model deployments, connections, files, evaluations, and hosted agents. The `AZURE_AI_PROJECT_ENDPOINT` value in your `.env` points to exactly one project, usually in this shape:
+### Option A — GitHub Codespaces (recommended)
 
-```text
-https://<foundry-resource>.services.ai.azure.com/api/projects/<project-name>
-```
+In your new repo, click **Code → Codespaces → Create codespace on `main`**. The first build takes ~2 minutes; after that the included devcontainer has everything pre-installed:
 
-In this workshop, TravelBuddy uses that endpoint plus `AZURE_AI_MODEL_DEPLOYMENT_NAME` to find the model deployment inside your project.
+- Python 3.12, `az` CLI (with Bicep), `azd` CLI, `uv`, `git`, `gh`, Node.js, GitHub Copilot CLI (`copilot`)
+- VS Code extensions: **Python**, **Pylance**, **Python Debugger**, **Foundry Toolkit**, **Bicep**, **Azure MCP Server (Azure Skills)**, **YAML**, **GitHub Pull Requests**
+- The **Azure Skills** plugin for the GitHub Copilot CLI is installed (its Azure MCP + Foundry MCP tools require `az login` at use time)
+- The post-create step has already created `.venv/` and installed workshop dependencies from `travel_assistant/requirements.txt` (or `.workshop/step_files/00/requirements.txt`) plus `.workshop/scripts/requirements.txt`
 
-A **raw model call** sends a prompt directly to a model deployment and gets one response back. That is useful, but the caller must know all of the app wiring: which model to use, what instructions to send, how to manage conversation state, where tools live, and how to deploy the code.
+> ⚠️ **Wait for "Initialize workshop" to finish first.** If you create the Codespace before that Action has applied step 0, the container falls back to `.workshop/step_files/00/requirements.txt` for workshop deps. After the Action turns green, rebuild the Codespace (Command Palette → **Codespaces: Rebuild Container**) so it picks up `travel_assistant/requirements.txt`.
 
-A **Foundry hosted agent** is different: it is an agent application packaged as a **container image** and deployed **into your Foundry project**, where Foundry runs it for you as a managed service. The package tells Foundry how to start the agent, which protocol it serves, which environment variables it needs, and what resources it should get. In Step 1 the agent only chats; in later steps the same hosted boundary becomes the place where TravelBuddy gains tools, retrieval, workflows, and memory.
+If you go this route, **skip the "Install the tools you'll need" section** below and jump straight to **"Set up your local environment (one-time)"**.
+👉 Direct link: [Set up your local environment (one-time)](#set-up-your-local-environment-one-time)
 
-The **Microsoft Agent Framework** is the Python/.NET SDK we use to build the agent in code. Here, `FoundryChatClient` connects to your Foundry project and model deployment, `Agent` defines TravelBuddy's name and instructions, and `ResponsesHostServer` exposes the agent through the Responses protocol. `DefaultAzureCredential` reuses the Azure sign-in you created with `az login`.
+### Option B — Clone locally
 
-The YAML files are the smallest hosted-agent package:
-
-- `agent.yaml` describes the local hosted runtime that `azd ai agent run` and the Foundry Toolkit can start.
-- `agent.manifest.yaml` describes the template metadata that `azd ai agent init` (and the Foundry Toolkit) reads to scaffold the Azure deployment artifacts (`azure.yaml` and `infra/`).
-- `main.py` is ordinary Python code, so you can run the same agent locally before deploying it.
-- `Dockerfile` and `.dockerignore` package `main.py` and its dependencies into the container image Foundry runs.
-- `.azdignore` keeps scaffolding-only files (`agent.manifest.yaml`, `agent.yaml`, `.env.example`) out of that deployment upload.
-
-```mermaid
-flowchart LR
-    User[User] --> Client[Agent Framework Client]
-    Client --> Project[Foundry Project]
-    Project --> Agent["Hosted agent: ${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"]
-    Project --> Model[Model deployment]
-    Agent --> Model
-```
-
-Helpful references:
-
-- [What is Microsoft Foundry?](https://learn.microsoft.com/azure/ai-foundry/what-is-azure-ai-foundry)
-- [Create a project for Microsoft Foundry](https://learn.microsoft.com/azure/ai-foundry/how-to/create-projects)
-- [What are hosted agents?](https://learn.microsoft.com/azure/foundry/agents/concepts/hosted-agents)
-- [agent.yaml / agent.manifest.yaml schema reference](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-yaml-reference)
-- [Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/overview/agent-framework-overview)
-- [Upstream `01-basic` hosted-agent sample](https://github.com/microsoft-foundry/foundry-samples/tree/main/samples/python/hosted-agents/agent-framework/responses/01-basic)
-
-## Steps
-
-### 1. Review `travel_assistant/agent.yaml`
-
-**Why this file exists:** `agent.yaml` is the **AgentDefinition** — the concrete hosted-agent runtime. It gives the agent a name, declares that it serves the `responses` protocol, sets a small CPU/memory shape, and lists the environment variables the runtime needs. It's a [ContainerAgent](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-yaml-reference#template-containeragent) (an AgentDefinition with `kind: hosted`).
-
-**What you do:** nothing to edit — this file is ready to run. Read it so you recognize each block. The name uses `${WORKSHOP_RESOURCE_PREFIX}` so your agent stays unique when many people deploy into the same project; the `${...}` values are resolved from your `.env` at run/deploy time.
-
-**What happens at run/deploy time:** `azd ai agent run` and the Foundry Toolkit read this file to start the local Responses host. Deployment tooling uses the same contract so the hosted runtime in Foundry receives the right environment values.
-
-Open `travel_assistant/agent.yaml` in your editor and skim it — the file is annotated with inline comments that explain each block.
-
-### 2. Review `travel_assistant/agent.manifest.yaml`
-
-**Why this file exists:** the manifest is the **AgentManifest** — a parameterized template that deployment tooling reads to *scaffold* your hosted agent (**scaffold** = automatically generate the starter project files so you don't write them by hand). It carries top-level metadata (name, description, tags), a `template` block (the hosted-agent definition), and a `resources` list of what deployment tooling should provision. The `name` fields are plain literals (`travel-buddy`). See the [schema reference](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-yaml-reference) for every field.
-
-> **Note — Why the names here are literals, and how values get filled in.** `azd ai agent init` validates the agent name *before* any substitution, so a `${...}` or `{{...}}` value in the `name` fields would fail; you attach your per-user prefix at init time with `--agent-name` (see the deploy step below). The `environment_variables` values use `${VAR}` references that resolve from your `.env` at run/deploy time — the same way `agent.yaml` does. (`{{ param }}` placeholders are only for values you declare in a `parameters:` block and get prompted for during `azd ai agent init`; this workshop doesn't use them.)
-
-**What you do:** nothing to edit — this file is ready to use. Read it so you understand what it declares. Notice that `resources` is **empty (`[]`)**: you already deployed a model in Step 0, and the agent picks it up at runtime through the `AZURE_AI_MODEL_DEPLOYMENT_NAME` environment variable (see [Model resource](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-yaml-reference#model-resource)). Because the model already exists, there's nothing for `azd` to provision, so you don't declare a `kind: model` resource here.
-
-**What happens at run/deploy time:** `azd ai agent init -m travel_assistant/agent.manifest.yaml` reads this file to generate the root deployment artifacts (`azure.yaml` and `infra/`). With no model resource declared, it wires up only the container-hosting infrastructure and leaves your existing model deployment alone. The Foundry Toolkit also uses manifest metadata when walking you through hosted-agent setup.
-
-Open `travel_assistant/agent.manifest.yaml` and read through it — the inline comments call out what each block declares and why `resources` is empty.
-
-### 3. Write TravelBuddy's instructions in `travel_assistant/main.py`
-
-**Why this file exists:** `main.py` is the Python process that hosts TravelBuddy. It creates the Foundry model client, defines the agent instructions, and starts the Responses server.
-
-**What you edit:** the scaffold already wires up `FoundryChatClient`, `Agent`, and `ResponsesHostServer` — you complete the single `TODO` inside `main()`, replacing the placeholder `instructions=` string with TravelBuddy's system prompt: a friendly travel assistant that gives practical, concise trip-planning advice with local context, budget awareness, and safety-minded tips.
-
-**What happens at run/deploy time:** locally, this process serves an OpenAI-compatible Responses endpoint on `http://localhost:8088`. After deployment, Foundry starts the same code as the hosted container entry point.
-
-Open `travel_assistant/main.py` and complete the `TODO`. If you get stuck, the finished file is in [`.workshop/solutions/01-basic/`](.workshop/solutions/01-basic/).
-
-`ResponsesHostServer` is the hosted-agent contract: when started locally it serves an OpenAI-compatible Responses endpoint on `http://localhost:8088`; when packaged and deployed to Foundry it becomes the container entry point. The same code runs in both places.
-
-> **Note — Three different "names" show up in this step — they live at different layers and don't have to match.**
->
-> - **Manifest name** — `name` / `template.name` in `agent.manifest.yaml` (`travel-buddy`) is the template's declared identity, the value `azd ai agent init` reads to scaffold your agent. It **must be a plain literal**: `init` validates it *before* any variable substitution, so `${WORKSHOP_RESOURCE_PREFIX}-…` would be rejected. You attach your per-user prefix separately, at init time, with `--agent-name` (see the deploy step below). Reference: [agent.yaml / manifest schema](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-yaml-reference).
-> - **Deployed agent name** — the `name` in `agent.yaml` (`${WORKSHOP_RESOURCE_PREFIX}-travel-buddy`), resolved with your prefix via `--agent-name`, is the **hosted agent's identity in your Foundry project** — what the portal shows and what `.workshop/scripts/cleanup.py` matches on to tear things down. Reference: [Manage hosted agents (azd)](https://learn.microsoft.com/azure/foundry/agents/how-to/manage-hosted-agent).
-> - **Runtime name** — `Agent(name="travel-buddy")` in `main.py` is the **Agent Framework's in-process name**. It's a code-level string (not an Azure resource name, so it isn't bound by azd's naming rules). It appears in tracing/observability, identifies the responder in the Responses output, and — most importantly — becomes the **reference key when you compose agents later**: with `as_tool()` (agent-as-a-tool) or handoffs, an agent's `name` is the tool/route name the coordinator calls. That's why Step 7 gives each specialist its own name. Reference: [Agent Framework agents](https://learn.microsoft.com/agent-framework/agents/).
->
-> The template and in-code names are both `travel-buddy`; only the **deployed** agent differs, carrying your prefix as `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy`. They live at different layers, so they don't have to match — but using one stable base name keeps the agent easy to follow as it grows across steps.
-
-### 4. Review the container and deploy files
-
-Three more files ship with Step 1. You don't edit them, but reading them shows how TravelBuddy goes from local Python to a container Foundry runs.
-
-**`Dockerfile` — how the agent is packaged.** Foundry runs your hosted agent as a container, and this is the recipe. It starts from `python:3.12-slim`, copies your `travel_assistant/` code into the image, installs `requirements.txt`, exposes port **8088**, and launches `python main.py`. That `EXPOSE 8088` matches the port `ResponsesHostServer` listens on, so the same entry point you run locally is what serves traffic once deployed.
-
-**`.dockerignore` — what stays out of the image.** It excludes local-only cruft (`.venv`, `__pycache__`, `*.pyc`, …) so the build context stays small, and — importantly — it excludes **`.env`** so your local secrets are never baked into the container image. A deployed runtime gets its configuration from the azd/Foundry environment, not from a file in the image.
-
-**`.azdignore` — what `azd` doesn't upload.** When `azd` packages your agent for deployment, it skips everything listed here. Step 1 ignores three files, because none of them belong in the deployed container:
-
-- **`agent.manifest.yaml`** — a **scaffolding-time** template. `azd ai agent init` reads it once to generate `azure.yaml` and `infra/`; the running container never needs it.
-- **`agent.yaml`** — its contents are **folded into the generated `azure.yaml`** during scaffolding, so the deployment already carries this information and shipping `agent.yaml` again would be redundant.
-- **`.env.example`** — only a placeholder template. Real configuration comes from your azd environment (`.env`), so the sample doesn't belong in the upload.
-
-Open the three files and skim them so you recognize what each one controls.
-
-### 5. Confirm env
-
-Make sure your `.env` contains values for `AZURE_AI_PROJECT_ENDPOINT` and `AZURE_AI_MODEL_DEPLOYMENT_NAME`. If you're unsure, rerun:
-
-<!-- terminal -->
 ```bash
-# If you activated .venv
-python .workshop/scripts/preflight.py --step 1
-
-# If you're using uv without activation
-uv run python .workshop/scripts/preflight.py --step 1
+git clone https://github.com/<your-owner>/<your-repo>.git
+cd <your-repo>
 ```
 
-## Run and deploy TravelBuddy
+Then continue with **"Install the tools you'll need"** below to install Python, `az`, `azd`, and (optionally) `uv` on your machine.
 
-You can run and deploy TravelBuddy two ways: with the [**Azure Developer CLI** (`azd`)](#option-1--azure-developer-cli-azd) or with the [**VS Code Foundry Toolkit**](#option-2--vs-code-foundry-toolkit) extension. Both wrap the same hosted-agent contract — pick one. The workshop's later steps default to `azd` snippets because they script cleanly, but the Toolkit gives you the same flow in a UI.
+## Install the tools you'll need
 
-> **One-time generated files:** these are created once and reused by later steps — don't regenerate them per step. [Option 1 — Azure Developer CLI (`azd`)](#option-1--azure-developer-cli-azd) generates a **project folder named after your agent** (`${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`) containing `azure.yaml` and `infra/`; [Option 2 — VS Code Foundry Toolkit](#option-2--vs-code-foundry-toolkit) generates `.vscode/tasks.json` and `.vscode/launch.json`. Don't just keep these files — **commit them when the step is complete**. Pushing them to `main` is what loads the next step.
+> 💡 **In a Codespace?** Skip this section — the devcontainer already installed all of these. Jump to **"Set up your local environment (one-time)"**.
 
-### Option 1 — Azure Developer CLI (`azd`)
+**Prerequisites at a glance:**
 
-1. **Scaffold `azure.yaml` and `infra/`** from the manifest (one-time per workshop):
+- **Azure subscription** with access to a Foundry project and a deployed model such as `gpt-4o-mini` or `gpt-4.1-mini`. See [Create a Foundry project](https://learn.microsoft.com/azure/ai-foundry/how-to/create-projects).
+- **A role that lets you *use* the project** — **`Foundry User`** (formerly *Azure AI User*) on the Foundry project. This is the least-privilege role for *using* a project — prefer it over broader roles like Owner or Contributor. If you created the project you already have at least this. Some steps assign extra roles as needed (Step 5 adds Azure AI Search roles; Step 6 reuses `Foundry User` for the Skills API and grants it to the deployed agent's identity).
+- **Python 3.10 or newer** (the devcontainer ships 3.12).
+- **Azure CLI (`az`)** — used by `DefaultAzureCredential` for local auth.
+- **Azure Developer CLI (`azd`)** with the [`microsoft.foundry` extension](https://learn.microsoft.com/azure/foundry/agents/how-to/install-cli-foundry-extensions) — used to scaffold, provision, run, and deploy hosted agents.
+- **VS Code + [Foundry Toolkit](https://marketplace.visualstudio.com/items?itemName=ms-windows-ai-studio.windows-ai-studio)** *(optional, recommended)* — UI alternative to `azd` for running, debugging, and deploying hosted agents.
+- **[GitHub Copilot CLI](https://github.com/github/copilot-cli) (`copilot`)** *(optional, recommended)* — AI-powered CLI assistant. Install with `npm install -g @github/copilot` (the devcontainer installs it automatically via the `copilot-cli` feature).
+- **[Bicep](https://learn.microsoft.com/azure/azure-resource-manager/bicep/install)** *(optional, recommended)* — infrastructure-as-code language for the `azd`-generated `infra/`. Install the CLI with `az bicep install` and the [Bicep VS Code extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-bicep) for language support.
+- **[Azure Skills](https://github.com/microsoft/azure-skills)** *(optional, recommended)* — Azure skills and MCP server configurations for AI coding assistants. In VS Code install the [Azure MCP extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-azure-mcp-server); for the GitHub Copilot CLI run `/plugin marketplace add microsoft/azure-skills` then `/plugin install azure@azure-skills`. Requires **Node.js 18+** (the MCP servers run via `npx`) and an authenticated `az login` for the Azure tools.
+- **[`uv`](https://docs.astral.sh/uv/)** *(optional)* — a faster drop-in for `pip`/`venv`. Anywhere this workshop says `pip` or `python -m venv` you can use `uv pip` or `uv venv` instead.
 
-   Load your `.env` into the shell first (the repo `.env` isn't auto-loaded — only Python's `load_dotenv()` and azd's YAML templating read it), then pass the expanded prefix to `--agent-name`:
+### Python 3.10+
 
-   <!-- terminal -->
+- **Windows:**
+  ```powershell
+  winget install --id Python.Python.3.12 -e
+  ```
+- **macOS:** install from [python.org](https://www.python.org/downloads/) or `brew install python@3.12`.
+- **Linux (Ubuntu/Debian):**
+  ```bash
+  sudo apt update && sudo apt install -y python3 python3-venv python3-pip
+  ```
+
+Verify:
+
+```bash
+python --version  # or `python3 --version`
+```
+
+### Azure CLI (`az`)
+
+Full instructions: [Install the Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli).
+
+- **Windows:**
+  ```powershell
+  winget install --id Microsoft.AzureCLI -e
+  ```
+- **macOS:**
+  ```bash
+  brew update && brew install azure-cli
+  ```
+- **Linux (Ubuntu/Debian):**
+  ```bash
+  curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+  ```
+
+Verify:
+
+```bash
+az --version
+```
+
+### Azure Developer CLI (`azd`)
+
+Full instructions: [Install the Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd).
+
+- **Windows:**
+  ```powershell
+  winget install --id Microsoft.Azd -e
+  ```
+- **macOS:**
+  ```bash
+  brew tap azure/azd && brew install azd
+  ```
+- **Linux:**
+  ```bash
+  curl -fsSL https://aka.ms/install-azd.sh | bash
+  ```
+
+Verify:
+
+```bash
+azd version
+```
+
+### Optional: `uv` (faster Python package manager)
+
+Full instructions: [Install `uv`](https://docs.astral.sh/uv/getting-started/installation/).
+
+- **Windows:**
+  ```powershell
+  winget install --id=astral-sh.uv -e
+  ```
+- **macOS / Linux:**
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+## Set up your local environment (one-time)
+
+> 💡 **In a Codespace?** The devcontainer already handled the venv and the `pip install` (substeps 3 and 5 below) — but you still need to do **substeps 1, 2, 4, and 6** (`az login`, `azd auth login` + ext install, copy `.env`, run preflight). Authentication and your `.env` can't be baked into the container.
+
+1. **Sign in to Azure**:
+   ```bash
+   az login
+   ```
+   If needed, select a subscription:
+   ```bash
+   az account set -s <subscription>
+   ```
+2. **Sign in to azd and install the Foundry extension** (one-time):
+   ```bash
+   azd auth login
+   azd ext install microsoft.foundry
+   ```
+   This adds the `azd ai agent ...` subcommands used from Step 1 onward to scaffold `azure.yaml`/`infra/`, provision Foundry resources, run the agent locally, deploy, and invoke. `microsoft.foundry` is a meta-package that installs all the Foundry `azd ai` extensions — see [Install the Azure Developer CLI Foundry extensions](https://learn.microsoft.com/azure/foundry/agents/how-to/install-cli-foundry-extensions) for details. If you'd rather drive everything from VS Code, the **Foundry Toolkit** extension exposes the same operations as palette commands and a sidebar. If you have a Python virtual environment active (next substep), the Foundry Toolkit picks it up automatically when you press **F5** to debug.
+3. **Create and activate a Python virtual environment.**
+
+   Pick one of the two options below. Option A uses the Python stdlib `venv` module and matches the rest of the workshop; Option B uses [`uv`](https://docs.astral.sh/uv/), which is significantly faster but requires installing `uv` first (see above). Both options create the environment at `.venv/`, so the activation commands are the same.
+
+   **Option A — `python -m venv` (default)**
+   ```bash
+   python -m venv .venv
+   ```
+
+   **Option B — `uv venv`**
+   ```bash
+   uv venv .venv
+   ```
+
+   Then activate it:
+
+   - macOS / Linux:
+     ```bash
+     source .venv/bin/activate
+     ```
+   - Windows (PowerShell):
+     ```powershell
+     .\.venv\Scripts\Activate.ps1
+     ```
+
+   > 💡 **`uv` users:** activation is optional. `uv pip install`, `uv run`, and `uv` itself auto-discover `.venv/` in the current directory. If you skip activation, prefix later Python commands with `uv run` (e.g. `uv run python .workshop/scripts/preflight.py`) so they use the venv's interpreter.
+4. **Configure environment**: setup and every later step read their configuration from a repo-root `.env` file, so create it **before** running preflight — copy the template, then fill it in:
+
    ```bash
    # bash / zsh
-   set -a; source .env; set +a
-   azd ai agent init -m travel_assistant/agent.manifest.yaml \
-     --agent-name "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+   cp .env.example .env
    ```
 
-   <!-- terminal -->
    ```powershell
    # PowerShell
-   Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
-     $name, $value = $_ -split '=', 2
-     Set-Item "Env:$($name.Trim())" $value.Trim()
-   }
-   azd ai agent init -m travel_assistant/agent.manifest.yaml `
-     --agent-name "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
+   Copy-Item .env.example .env
    ```
 
-   This reads your manifest, asks any setup questions it needs, and creates a **new project folder named after your agent** (`${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`) containing the `azure.yaml` and `infra/` that `azd provision` and `azd deploy` use. If that folder already exists from an earlier run, don't delete it just because you moved to a new step.
+   Then edit `.env`:
+   - `AZURE_AI_PROJECT_ENDPOINT` — from your Foundry project's overview page.
+   - `AZURE_AI_MODEL_DEPLOYMENT_NAME` — your deployment name, for example `gpt-4o-mini`.
+   - `WORKSHOP_RESOURCE_PREFIX` — this prefixes **every** Azure/Foundry resource the workshop creates (and is how `.workshop/scripts/cleanup.py` finds them later). If you're working solo in your own subscription, leave the default `foundry-workshop`. But if you **share the Foundry project or subscription** with other people running this workshop, change it to a value unique to you (for example `foundry-workshop-<your-alias>`) so your resource names don't **collide** with a teammate's — otherwise provisioning can fail on name conflicts, and cleanup could delete each other's resources.
+   - Leave step-specific variables empty for now; the README will tell you when to fill them.
+5. **Install dependencies** (use the option that matches your venv choice above):
 
-   > **Why `--agent-name`?** The manifest's `name`/`template.name` must be a plain literal (`travel-buddy`) — `azd ai agent init` validates the agent name *before* any substitution, so a `${WORKSHOP_RESOURCE_PREFIX}-…` or `{{…}}` value there would fail with `invalid agent name`. But the **deployed** Foundry agent identity should still carry your prefix so it stays unique in shared projects and so `.workshop/scripts/cleanup.py` (which deletes only resources whose names start with `WORKSHOP_RESOURCE_PREFIX`) can find it. Passing `--agent-name` sets that deployed identity explicitly, matching the name `agent.yaml` already uses locally (`${WORKSHOP_RESOURCE_PREFIX}-travel-buddy`).
-
-   > **Why load `.env` instead of putting `${WORKSHOP_RESOURCE_PREFIX}` directly on the flag, like in `agent.yaml`?** Those are two different substitution engines. Inside `agent.yaml`/`agent.manifest.yaml`, `${WORKSHOP_RESOURCE_PREFIX}` is *azd's* template placeholder, which azd resolves from `.env` when it reads those files. `--agent-name` is a **command-line argument** that azd validates *before* any templating, so azd's `${…}` syntax isn't interpreted there. Instead, **your shell** expands the variable — but the repo `.env` isn't auto-loaded into your shell, which is why you load it first with the one-liner above before passing the already-expanded value.
-
-   After init, azd creates the **project folder named after your agent** (`${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`). `cd` into it and set the variables that `azure.yaml` references in the **azd env** — keep your `.env` loaded in the shell (same one-liner as above) so you can pass the values through:
-
-   <!-- terminal -->
+   **Option A — `pip`**
    ```bash
-   # bash / zsh — after: set -a; source .env; set +a
-   cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   azd env set AZURE_AI_PROJECT_ENDPOINT "$AZURE_AI_PROJECT_ENDPOINT"
-   azd env set AZURE_AI_MODEL_DEPLOYMENT_NAME "$AZURE_AI_MODEL_DEPLOYMENT_NAME"
-   azd env set WORKSHOP_RESOURCE_PREFIX "$WORKSHOP_RESOURCE_PREFIX"
+   pip install -r travel_assistant/requirements.txt
+   pip install -r .workshop/scripts/requirements.txt
    ```
 
-   <!-- terminal -->
-   ```powershell
-   # PowerShell — after loading .env into the shell
-   cd "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   azd env set AZURE_AI_PROJECT_ENDPOINT "$env:AZURE_AI_PROJECT_ENDPOINT"
-   azd env set AZURE_AI_MODEL_DEPLOYMENT_NAME "$env:AZURE_AI_MODEL_DEPLOYMENT_NAME"
-   azd env set WORKSHOP_RESOURCE_PREFIX "$env:WORKSHOP_RESOURCE_PREFIX"
-   ```
-
-   > **Why azd asks for these when they're already in `.env`.** azd keeps its **own** environment store at `.azure/<env-name>/.env` inside the new project folder, which is **separate from the repo-root `.env`** you've been editing. The generated `azure.yaml` reads from the *azd* env, so azd doesn't see the values in your repo `.env` and asks you to set them once. `cd` into the project folder, then run the `azd env set` commands azd printed.
-
-2. **Provision** the hosted-agent infrastructure (first deploy only):
-
-   <!-- terminal -->
+   **Option B — `uv pip`**
    ```bash
-   azd provision
+   uv pip install -r travel_assistant/requirements.txt
+   uv pip install -r .workshop/scripts/requirements.txt
    ```
-
-   This signs into Azure through `azd`, asks you to choose a subscription/location if needed, and creates the container-hosting infrastructure (resource group, container registry, and supporting resources) wired to the Foundry project from your `.env`. It does **not** create a model deployment — you already deployed one in Step 0, and the agent uses it at runtime via `AZURE_AI_MODEL_DEPLOYMENT_NAME`. Wait for a successful summary before continuing.
-
-3. **Run TravelBuddy locally** in the hosted Responses runtime:
-
-   <!-- terminal -->
+6. **Run preflight**:
    ```bash
-   azd ai agent run
+   # If you activated .venv
+   python .workshop/scripts/preflight.py
+
+   # If you're using uv without activation
+   uv run python .workshop/scripts/preflight.py
    ```
+   Fix any ❌. ⚠️ items are usually safe to ignore until later steps.
 
-   `azd` reads `agent.yaml`, substitutes values from your environment, and starts the server on `http://localhost:8088`. Leave this terminal running; it is your local hosted-agent process.
+## How the workshop works
 
-4. **Invoke the local agent from a new terminal.** The `azd ai agent run` process from the previous step is still running and holding its terminal, so open a **second terminal** for this command (in the same project folder):
+This workshop has one important contract: **`README.md` is the current step**. Each time you advance, the repository rewrites `README.md` so the next set of instructions appears in place.
 
-   <!-- terminal -->
-   ```bash
-   azd ai agent invoke --local "I'm planning a trip to Lisbon — give me three things you'd want me to know."
-   ```
+- **Leaving Setup (this step):** click the **▶ Start the workshop** button at the bottom. It opens the workshop's GitHub Action — click **Run workflow**, and it moves you from Setup to Step 1.
+- **Every step after that:** there is no button. When you finish a step, **commit the files you created and push them to `main`**. The push triggers the **Advance workshop on push to main** Action, which loads the next step. Each landed push advances by exactly **one** step, so push once — when the step is done.
+- After the Action finishes, run **`git pull`** locally. If you are reading in the GitHub UI, refresh the page to see the new `README.md`.
+- Advancing lays the next step's canonical files **on top of** your `travel_assistant/` directory. Files from earlier steps that the next step doesn't touch are kept as-is — nothing is deleted. Files the next step ships are refreshed to that step's version, and your current edits are first saved to `.workshop_instance/workshop_backups/step-<N>/` in the same commit so you can recover your own wording.
 
-   Expected: TravelBuddy streams a travel-focused answer back to your terminal.
+## What you'll build
 
-   Prefer a UI? With the local agent still running, open the **Agent Inspector** from the Foundry Toolkit (Command Palette → **Foundry Toolkit: Open Agent Inspector**, or the **Agent Inspector** entry under **Developer Tools**). It connects to `http://localhost:8088` and lets you chat with TravelBuddy and watch the streamed Responses events.
+- Step 1: Chat with a basic hosted `TravelBuddy` agent.
+- Step 2: Add function tools for weather, local time, and currency conversion.
+- Step 3: Connect an MCP server for external travel documentation.
+- Step 4: Use Foundry tools such as Code Interpreter and web search for itinerary analysis.
+- Step 5: Ground recommendations with a destinations knowledge base through RAG.
+- Step 6: Package reusable itinerary behavior as a skill.
+- Step 7: Coordinate flight, hotel, and activities specialists with native multi-agent patterns.
+- Step 8 (🧪 experimental): Re-express the same planning flow as a durable workflow with checkpoints.
+- Step 9 (🧪 experimental): Remember user preferences across sessions with Foundry Memory.
 
-   ![Foundry Toolkit Agent Inspector connected to the local TravelBuddy agent on localhost:8088, showing the Playground chat and streamed response events](.workshop/docs/assets/01-agent-inspector.png)
+## When you're ready
 
-5. **Deploy to Foundry**. Subsequent workshop steps only need `azd deploy`:
+Make sure `python .workshop/scripts/preflight.py` is green (or `uv run python .workshop/scripts/preflight.py` if you're using `uv` without activation), then click the button below to open the workflow — and click **Run workflow** in the dialog that appears:
 
-   <!-- terminal -->
-   ```bash
-   azd deploy
-   ```
+[![▶ Start the workshop](https://img.shields.io/badge/%E2%96%B6_Start_the_workshop-Step_01-2ea44f?style=for-the-badge)](https://github.com/frostbyte74/foundry-hosted-agents-workshop/actions/workflows/start-workshop.yml)
 
-   The first deploy builds the container, pushes it to your Azure Container Registry, and starts the hosted agent runtime in Foundry. Expect ~5–10 minutes.
+Click **Run workflow** to move from Setup to Step 1. Pull after the action completes. From Step 1 onward you advance by committing your work and pushing to `main` — there is no button. With setup already done, Step 1 jumps straight into authoring `agent.yaml`, `agent.manifest.yaml`, and `main.py` for your first hosted TravelBuddy agent.
 
-6. **Invoke the deployed agent**:
+## Working fully locally (no GitHub Actions)
 
-   <!-- terminal -->
-   ```bash
-   azd ai agent invoke "I'm planning a trip to Lisbon — give me three things you'd want me to know."
-   ```
+You can run the entire workshop loop from your terminal — no browser, no Actions, no `git push` required. Pick whichever flow you prefer; both keep the repository in the same state.
 
-   Prefer a UI? Open the **Hosted Agent Playground** from the Foundry Toolkit (under **Developer Tools** → **Build** → **Hosted Agent Playground**). Pick your deployed agent and version, then chat with TravelBuddy and inspect session details, logs, and traces directly in VS Code.
+The button in each step's README is just a thin wrapper around `.workshop/scripts/advance_step.py`. Running the script locally does exactly the same file rewrites.
 
-   ![Foundry Toolkit Hosted Agent Playground with the deployed TravelBuddy agent selected, showing the Playground chat and session details panel](.workshop/docs/assets/01-hosted-agent-playground.png)
+**Advance one step:**
 
-   When you select **Hosted Agent Playground** in the Foundry Toolkit's **Developer Tools**, you'll be prompted to sign in. If the interactive sign-in doesn't complete, cancel it and choose the **device code** flow instead. Once signed in, select the Foundry project that hosts your deployed agent.
+```bash
+python .workshop/scripts/advance_step.py --expected-current-step <N> --auto-commit
+```
 
-### Option 2 — VS Code Foundry Toolkit
+Where `<N>` is the step number you're currently on (the value the button asks for). You can omit `--expected-current-step` locally if you trust the state — the script will print the detected step and advance anyway. The `--auto-commit` flag stages **only** the workshop-owned paths (`README.md`, `.workshop_instance/.workshop-state.json`, `travel_assistant/`, `.workshop_instance/workshop_backups/`) and creates a commit with the same message the Action uses, so unrelated local edits or untracked files are never swept in.
 
-The [Foundry Toolkit](https://marketplace.visualstudio.com/items?itemName=ms-windows-ai-studio.windows-ai-studio) is pre-installed in Codespaces by the devcontainer. If you're using local VS Code, the repo's `.vscode/extensions.json` recommends it; accept the install prompt or install it from the Marketplace.
+**Reset the workshop:**
 
-1. Open the Command Palette (`Ctrl+Shift+P`) → **Foundry Toolkit: Create Hosted Agent** (or open the existing `travel_assistant/` hosted-agent folder if you've already completed the scaffold). The extension creates `.vscode/tasks.json` and `.vscode/launch.json`, then walks you through **Foundry Project Setup** to choose a subscription and existing Foundry project, or create one.
-2. Press **F5** to start TravelBuddy locally in debug mode. VS Code should run the generated task, start `travel_assistant/main.py`, and show that the Responses host is listening on `http://localhost:8088`.
-3. Command Palette → **Foundry Toolkit: Open Agent Inspector**. The Inspector connects to the running local agent so you can send messages and watch streamed responses.
-4. Command Palette → **Foundry Toolkit: Deploy Hosted Agent**. The wizard reads `agent.yaml` and opens **Deploy Hosted Agent**:
-   - Confirm subscription/project under **Basics**.
-   - Pick deployment method (**Code** or **Container**), then confirm the agent name is **`${WORKSHOP_RESOURCE_PREFIX}-travel-buddy`** — the same prefixed identity the `azd` path sets with `--agent-name`. The wizard prefills it from `agent.yaml`'s `name`; if it shows the unresolved `${WORKSHOP_RESOURCE_PREFIX}` placeholder or a bare `travel-buddy`, set it to your prefixed value so the deployed agent stays unique in shared projects and `.workshop/scripts/cleanup.py` can find it later.
-   - On **Review + Deploy**, pick CPU/memory and click **Deploy**.
-5. After deployment, open the agent in the **Agent Playground** and stream live logs from the **Logs** tab in the Toolkit sidebar. You should see the deployed TravelBuddy respond the same way your local debug run did.
+```bash
+python .workshop/scripts/advance_step.py --reset --auto-commit
+```
 
-## Try it
+Your previous `travel_assistant/` is preserved under `.workshop_instance/workshop_backups/reset-<timestamp>/`.
 
-Whichever option you picked, try a few prompts:
+**Pull the latest workshop machinery (without advancing):**
 
-- "I'm planning a trip to Lisbon — give me three things you'd want me to know."
-- "What's a budget-friendly weekend in Reykjavik like?"
-- "Compare Tokyo and Seoul for a first-time visitor."
+```bash
+python .workshop/scripts/sync_template.py --auto-commit   # add --push to push too
+```
+
+Occasionally the upstream template ships fixes to the workshop machinery (the authoring material under `.workshop/` and the GitHub configuration under `.github/`). This pulls those into your instance **without moving to the next step** and without touching your `travel_assistant/`, your `.workshop_instance/` state, `README.md`, or `.env`. The commit carries a `[skip-advance]` marker, so pushing it never advances you. A local run also refreshes `.github/workflows/`; the automated CI sync deliberately skips workflow files so it stays tokenless (no Personal Access Token required).
+
+**Reset the current step (re-lay its clean starter files):**
+
+```bash
+python .workshop/scripts/advance_step.py --reset-current --auto-commit
+```
+
+Re-lays the **current** step's clean starter files and re-renders its `README.md`, staying on the current step — unlike `--reset`, which returns you to step 0. Your previous `travel_assistant/` is backed up under `.workshop_instance/workshop_backups/reset-current-<step>-<timestamp>/` first. Pair it with a sync when you want the current step's delivery refreshed too: **sync first, then reset the current step**. (If you sync just before advancing, you don't need this — advancing already lays down fresh files.)
+
+**Re-run preflight:**
+
+```bash
+# If you activated .venv
+python .workshop/scripts/preflight.py
+
+# If you're using uv without activation
+uv run python .workshop/scripts/preflight.py
+```
+
+**Shortcuts (optional):** the repo ships a `Makefile` with these aliases:
+
+```bash
+make advance        # advance to the next step (auto-commits workshop paths)
+make reset          # reset to step 0 (auto-commits workshop paths)
+make reset-current  # re-lay the current step's clean files (auto-commits)
+make preflight      # run environment checks
+make sync-template  # pull latest .workshop/ + .github/ from the template
+```
+
+When `make` is not available (e.g. on a clean Windows install), just run the equivalent `python .workshop/scripts/...` commands above.
+
+**When the button and the local flow are interchangeable.** Both write the same files. You can switch back and forth between clicking the button and running the script across steps without breaking anything — the script's state-sync check will catch any genuine drift before it advances.
 
 ## Troubleshooting
 
-- **`DefaultAzureCredential failed`**: run `az login`, confirm `az account show` returns your tenant.
-- **`Model deployment not found`**: confirm `AZURE_AI_MODEL_DEPLOYMENT_NAME` matches the deployment name in your Foundry project (case-sensitive).
-- **`401 Unauthorized`**: your Entra ID needs the `Cognitive Services User` (and ideally `Azure AI Developer`) role on the Foundry project resource.
+### "Workflow cannot push to main"
+
+A branch protection rule is blocking `GITHUB_TOKEN` from pushing the README update. Fix the rule in **Settings → Branches**, or allow the workflow/bot account to bypass the rule for this workshop repository.
+
+### "▶ Start the workshop" returns 404 (URL contains `%7B%7B`)
+
+This means the **Initialize workshop** Action hasn't run yet in your repo, so the button's URL still contains URL-encoded handlebars (`%7B%7B...%7D%7D`) where your repo owner and name should appear. To recover:
+
+1. Confirm Actions are enabled: **Settings → Actions → General → Allow all actions**.
+2. Confirm workflows can write: **Settings → Actions → General → Workflow permissions → Read and write permissions**.
+3. Open the **Actions** tab, choose **Initialize workshop**, click **Run workflow** on the default branch.
+4. Wait for the run to finish, then `git pull` locally (or refresh the GitHub UI). The button URL will now contain your real owner/repo and work on the first click.
+
+If you advanced past step 0 already and only just hit this, the **Start the workshop** Action also self-heals — running it from the Actions tab will perform the missed initialization in the same commit.
+
+### "Actions are disabled"
+
+Enable Actions in **Settings → Actions → General → Allow all actions**.
+
+### "Third-party actions blocked"
+
+This workshop does not use marketplace actions for advancing steps; it uses the repo's workflow plus plain `git push`. If your organization shows this warning, no third-party action exception is needed for the workshop advance flow.
+
+### "My push didn't advance the step"
+
+Auto-advance only runs for pushes to `main` in your own (non-template) repo, and it skips a few kinds of push that aren't step progress: pushes that only changed workshop bookkeeping such as `.workshop_instance/.workshop-state.json`, pushes whose commit carries a `[skip-advance]` marker (what a template sync adds), and pushes that changed **only** workshop machinery or platform files (`.github/`, `.workshop/`, `Makefile`, `.devcontainer/`, `README.md`, …) and never your delivery (`travel_assistant/` or its sibling folders like `travel_toolbox/`). That last case means you can pull the latest machinery from upstream and push it — even manually, without the `[skip-advance]` marker — without being bumped to the next step. Check the **Actions** tab for the **Advance workshop on push to main** run. If it was skipped, make sure your push touched a delivery file and that the previous advance already finished. If several quick pushes collapsed into a single advance, that's expected — each *landed* push advances one step.
+
+### "Codespace can't reach my Foundry project"
+
+`DefaultAzureCredential` may pick up the Codespace's GitHub token before your Azure CLI identity. Add `AZURE_TENANT_ID` to your environment, or run this in the Codespace terminal:
+
+```bash
+az login --use-device-code
+```
+
+### "My edits are gone after advancing"
+
+They were backed up to `.workshop_instance/workshop_backups/step-<previous>/` in the same commit that advanced the workshop. Cherry-pick or copy back anything you want to keep.
+
+## Cleanup
+
+When you finish, or if you want to abandon the workshop, step 99 runs `python .workshop/scripts/cleanup.py --apply` to delete all workshop-created Azure resources. The script only touches resources whose names start with `WORKSHOP_RESOURCE_PREFIX`. If you used `azd` to provision hosted-agent resources, you can alternatively run `azd down` to tear down the resources `azd` created.
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/01-basic/`](.workshop/solutions/01-basic/)
-
-## Upstream sample
-
-> This step is based on the upstream [`01-basic`](https://github.com/microsoft-foundry/foundry-samples/tree/main/samples/python/hosted-agents/agent-framework/responses/01-basic) sample.
+This step has no code to write — it's intro and setup of your repo from the template.
 
 
 ---
 
-<!-- workshop-footer: push-to-advance -->
+<!-- workshop-footer: start-workshop -->
 <a id="advance"></a>
 
-## ✅ Done with this step? Push to advance.
+[![▶ Start the workshop](https://img.shields.io/badge/%E2%96%B6_Start_the_workshop-Step_01-2ea44f?style=for-the-badge)](https://github.com/frostbyte74/foundry-hosted-agents-workshop/actions/workflows/start-workshop.yml)
 
-**Next:** Step 02 — Function tools
+**Next:** Step 01 — Basic hosted agent
 
-Commit the files you created or edited in this step and push them to `main`. The push automatically loads Step 02 — there is no button to click.
+Click the badge to open **Start the workshop**, then click **Run workflow**. It moves you from Setup to Step 01. Pull after the action completes.
 
-```bash
-git add -A
-git commit -m "Complete step 1"
-git push
-```
+Or open **Actions → Start the workshop → Run workflow** manually.
 
-After the **Advance workshop on push to main** Action finishes, run **`git pull`** to refresh your `README.md` and the next step's files. If you're reading on GitHub, refresh the page.
+From Step 01 onward you don't click a button to advance — you just **commit your work and push to `main`**, and the next step loads automatically.
 
-> Each push to `main` advances the workshop by exactly **one** step, so push once — when this step is done.
+> 💡 **Button returns 404?** Your repo's one-time **Initialize workshop** Action hasn't run yet. Open the **Actions** tab, run **Initialize workshop → Run workflow**, then refresh this page.
 
-> **Prefer to stay local?** Run `python .workshop/scripts/advance_step.py --expected-current-step 1 --auto-commit` (or `make advance`) instead. That advances locally and records it in the same commit, so your next push won't advance again. See [Working fully locally](.workshop/docs/steps/00-intro.md#5-working-fully-locally-no-github-actions).
+> **Prefer to stay local?** Run `python .workshop/scripts/advance_step.py --expected-current-step 0 --auto-commit` (or `make advance`) instead of clicking the button. See [Working fully locally](.workshop/docs/steps/00-intro.md#5-working-fully-locally-no-github-actions) for the full local flow.
 
-<sub>Made a mistake on this step? Re-lay its clean starter files with the [Reset current step](https://github.com/frostbyte74/foundry-hosted-agents-workshop/actions/workflows/reset-current-step.yml) workflow, or run `python .workshop/scripts/advance_step.py --reset-current --auto-commit` locally — you stay on this step. To start the whole workshop over instead, use [Reset workshop](https://github.com/frostbyte74/foundry-hosted-agents-workshop/actions/workflows/reset-workshop.yml) or `python .workshop/scripts/advance_step.py --reset --auto-commit`.</sub>
+<sub>Made a mistake? Use the [Reset workshop](https://github.com/frostbyte74/foundry-hosted-agents-workshop/actions/workflows/reset-workshop.yml) workflow, or run `python .workshop/scripts/advance_step.py --reset --auto-commit` locally.</sub>

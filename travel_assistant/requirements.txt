@@ -1,0 +1,15 @@
+# ---- Agent Framework with Microsoft Foundry ----
+agent-framework-foundry
+agent-framework-foundry-hosting>=1.0.0a260630
+
+# ---- Step 7: Multi-agent orchestration (HandoffBuilder) ----
+agent-framework-orchestrations
+
+# ---- Local Debugging in Foundry Toolkit ----
+debugpy
+
+# ---- RAG (Azure AI Search) ----
+agent-framework-azure-ai-search
+
+# ---- Step 6: Skills ----
+azure-ai-projects
