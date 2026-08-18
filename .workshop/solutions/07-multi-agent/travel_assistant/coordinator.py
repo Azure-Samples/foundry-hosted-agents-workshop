@@ -1,7 +1,6 @@
 # travel_assistant/coordinator.py
 import asyncio
 import io
-import logging
 import os
 import shutil
 import subprocess
@@ -32,9 +31,6 @@ from tools import convert_currency, get_local_time, get_weather
 
 load_dotenv(override=True)
 
-logger = logging.getLogger(__name__)
-
-
 # The Coordinator is the group chat MANAGER (the GroupChatBuilder orchestrator): each
 # round it reads the conversation and returns a STRUCTURED routing decision
 # (which specialist speaks next, or terminate with the final answer). The framework
@@ -58,8 +54,12 @@ Managing the conversation:
 - Pick the ONE specialist who owns the next missing piece of the answer, and let each specialist finish before you choose the next one.
 - For a complete trip plan, gather flight and hotel details first, then choose ActivitiesSpecialist LAST so it folds everything into the itinerary, produces the final PDF trip guide, and runs the response-guardrails check.
 - Terminate once the traveler's request is fully answered. When you terminate, write the final answer for the traveler: present the complete plan, and include the ActivitiesSpecialist's guarded guide and its PDF link verbatim — do not rewrite or drop them.
-- If a required detail is missing and blocks progress, terminate and ask the traveler that one question directly as the final answer, rather than looping a specialist.
-- You never call tools yourself — only the specialists do. You route and synthesize."""
+- You never call tools yourself — only the specialists do. You route and synthesize.
+
+Plan first, ask almost never:
+- Do NOT interrogate the traveler. Missing details are normal — route to a specialist and let it plan with sensible defaults (one traveler, economy, a three-night trip departing about four weeks out, mid-range budget), then surface those assumptions in your final answer so the traveler can correct them in a follow-up.
+- Never ask about dates, traveler count, cabin class, or budget: those always have a reasonable default.
+- Never open with a question. If a detail has no substitute — the destination, or the departure city when the traveler wants concrete flights — deliver the rest of the plan first, then close with that ONE question. Never repeat a question you already asked."""
 
 FLIGHTS_INSTRUCTIONS = """You are the Flights specialist for TravelBuddy.
 
@@ -68,13 +68,15 @@ Scope:
 - Always report concrete fares/prices for the flights you recommend, and convert them to the traveler's currency when asked.
 
 Tools (always use these rather than answering from memory):
-- Flight search in the toolbox for real routes, times, and fares. If no departure date is given, call get_local_time first and use the date part of its iso_time as today's date.
+- Flight search in the toolbox for real routes, times, and fares. If no departure date is given, call get_local_time first, use the date part of its iso_time as today's date, and search an outbound about four weeks out. Search the return leg separately, using the requested trip length (three nights if unstated), and price the two legs together.
 - get_weather when travel timing or disruption risk matters.
 - convert_currency when the traveler gives or asks for prices in another currency.
 
 Boundaries:
 - Do not choose hotels or activities.
-- Cover only the flight part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly. If a detail you need is missing, say what's missing instead of guessing."""
+- Never invent a departure city. If the traveler didn't give one, give the flight guidance that doesn't depend on it (best booking window, the usual airports and routings into the destination, and a rough fare range), and say plainly that a concrete route and fare need their departure city.
+- Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — one traveler, economy, and a round trip departing about four weeks out for the requested trip length (three nights if unstated) — and label it as an assumption in your findings so it can be corrected later.
+- Cover only the flight part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly."""
 
 HOTELS_INSTRUCTIONS = """You are the Hotels specialist for TravelBuddy.
 
@@ -90,7 +92,8 @@ Tools (always use these rather than answering from memory):
 Boundaries:
 - Do not invent live availability.
 - Do not plan full-day activities unless they affect neighbourhood choice.
-- Cover only the lodging part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly. If a detail you need is missing, say what's missing instead of guessing."""
+- Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — one room, mid-range budget, and the trip dates already in the conversation — or, if none are there yet, the requested trip length (three nights if unstated) starting about four weeks out — and label it as an assumption in your findings so it can be corrected later.
+- Cover only the lodging part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly."""
 
 # Activities owns the final deliverable in Step 7 (see the Coordinator note above): the
 # LOCAL travel-guide skill (always present) renders the PDF trip guide, and the FOUNDRY
@@ -112,7 +115,8 @@ Skills (always use these):
 
 Boundaries:
 - Do not choose flights or hotels.
-- You are usually chosen LAST, so fold the flight and hotel details already in the conversation into the itinerary and the final PDF guide. Then stop — the Coordinator relays your guarded guide to the traveler. If the itinerary needs a flight or hotel detail that isn't in the conversation yet, say what's missing rather than guessing."""
+- Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — a moderate pace, a mix of food, culture, and outdoor options, and the requested trip length (three nights if unstated, so schedule the arrival day, the full days between, and the departure day) — and label it as an assumption.
+- You are usually chosen LAST, so fold the flight and hotel details already in the conversation into the itinerary and the final PDF guide. Then stop — the Coordinator relays your guarded guide to the traveler."""
 
 
 def run_local_skill_script(

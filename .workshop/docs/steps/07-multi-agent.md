@@ -16,9 +16,9 @@
 - Everything from Steps 1–6 in `travel_assistant/` — the three function tools, the Foundry Toolbox, the Step 5 RAG provider, and the Step 6 itinerary skill. Nothing was deleted when you advanced.
 - `travel_toolbox/toolbox.yaml` — the toolbox definition, still a sibling of `travel_assistant/`.
 - `travel_assistant/agents/{flights,hotels,activities}/` — the per-specialist config slices (`agent.yaml` + `agent.manifest.yaml`), delivered complete when you advanced. You **read** these; you don't edit them.
-- `travel_assistant/coordinator.py` — a starter scaffold with `TODO`s that you fill in below.
+- `travel_assistant/coordinator.py` — the group chat, delivered **almost complete**: the instruction constants, the Step 5 RAG provider, the Step 6 skills provider and trusted script runner, the manager `Coordinator`, the `FlightsSpecialist` worked example, and the `GroupChatBuilder` graph are all wired for you. One `TODO` is left — adding the Hotels and Activities specialists.
 
-In this step you make **delta-only** edits: read the per-specialist config slices under `agents/`, build the group chat in `coordinator.py`, and point `main.py` at the Coordinator. There are **no** new environment variables and no manifest env changes — only a `Multi-Agent` tag and a `group_chat` metadata block.
+In this step you make **delta-only** edits: read the per-specialist config slices under `agents/`, fill in the single `TODO` in `coordinator.py` (the two remaining specialists), and point `main.py` at the Coordinator. There are **no** new environment variables and no manifest env changes — only a `Multi-Agent` tag and a `group_chat` metadata block.
 
 ## Concept (5-min read)
 
@@ -84,37 +84,46 @@ Reading them, notice the intended boundary of each specialist:
 
 Three small slices make each specialist's intended boundary explicit and easy to review — they're the architecture spec a teammate reads before touching the graph.
 
-> **The Foundry skill is optional here.** The **Activities** specialist owns the two skills that shape the final answer — the LOCAL `travel-guide` skill (renders the shareable PDF trip guide) and the Foundry `response-guardrails` skill carried from Step 6 — and the checked-in **solution is the Foundry-enabled reference**: its `coordinator.py`, `ACTIVITIES_INSTRUCTIONS`, and `.env.example` all wire the guardrails skill in and treat it as required. If you built it in Step 6, keep it: serve both skills from your skills provider and keep the "always apply `response-guardrails`" line in `ACTIVITIES_INSTRUCTIONS`. If you **skipped** the Foundry skill (for example your Foundry project can't allow public network access — see Step 6), leave `FOUNDRY_SKILL_NAMES` unset, drop the `response-guardrails` line from `ACTIVITIES_INSTRUCTIONS`, and serve only the local `travel-guide` skill — carry your Step 6 *local-only* skills provider rather than the solution's Foundry-enabled `_build_skills_provider`. The local `travel-guide` skill still renders the PDF and nothing else in this step depends on the Foundry skill. In practice, if you couldn't build the Foundry skill in Step 6 you already made your skills provider treat it as optional there — just carry that same local-only provider forward; there's nothing extra to redo here.
+> **The Foundry skill is optional here.** The **Activities** specialist owns the two skills that shape the final answer — the LOCAL `travel-guide` skill (renders the shareable PDF trip guide) and the Foundry `response-guardrails` skill carried from Step 6 — and the delivered `coordinator.py` (like the checked-in solution) is the **Foundry-enabled reference**: its `_build_skills_provider`, `ACTIVITIES_INSTRUCTIONS`, and `.env.example` all wire the guardrails skill in and treat it as required. If you built it in Step 6, keep it as delivered. If you **skipped** the Foundry skill (for example your Foundry project can't allow public network access — see Step 6), make two small edits in `coordinator.py`: replace the body of `_build_skills_provider` with your Step 6 *local-only* provider, and drop the `response-guardrails` line from `ACTIVITIES_INSTRUCTIONS` (leaving `FOUNDRY_SKILL_NAMES` unset). The local `travel-guide` skill still renders the PDF and nothing else in this step depends on the Foundry skill.
 
 > **Why the skills ride on Activities, not the Coordinator.** A skills provider is a **context provider that registers its skill *tools*** on whichever agent holds it. But the Coordinator here is the group chat **manager**: `GroupChatBuilder` invokes it each round for a *structured* routing decision (which specialist speaks next, or terminate with the final answer). You *could* attach tools or a skills provider to it — the framework doesn't strip them — but a skill it carried wouldn't reliably fire, because the manager's turn produces that routing decision, not the free, tool-driven answer that renders the PDF and runs the guardrail. The skills therefore live on the **Activities specialist** — a normal participant that runs its tools and skills freely. The trade-off: only Activities' output is guarded, not the manager's final synthesis, and the manager has to *route* the deliverable through Activities rather than being *structurally* forced to. That's a real limitation of a manager-plus-specialists chat, and it's exactly what **Step 8** fixes — its workflow adds a dedicated `finalize` node that owns the deliverable and guards the actual final answer.
 
-> **These slices are documentation, not runtime config.** Nothing loads `agent.yaml`/`agent.manifest.yaml` at run time. In the next section `coordinator.py` builds each specialist directly in Python: the `instructions:` become string constants and the tool/RAG/skill slices become hand-written `tools=[...]` and `context_providers=[...]` arguments. The slices are the reviewable **contract**; `coordinator.py` is the executable **source of truth**. That means they can drift, so when a specialist behaves unexpectedly, inspect `coordinator.py` first — then realign the slice so the two agree.
+> **These slices are documentation, not runtime config.** Nothing loads `agent.yaml`/`agent.manifest.yaml` at run time. `coordinator.py` builds each specialist directly in Python: the `instructions:` are already string constants there, and the tool/RAG/skill slices become the `tools=[...]` and `context_providers=[...]` arguments you write in the next section. The slices are the reviewable **contract**; `coordinator.py` is the executable **source of truth**. That means they can drift, so when a specialist behaves unexpectedly, inspect `coordinator.py` first — then realign the slice so the two agree.
 
-### 2. Build the group chat in `coordinator.py`
+### 2. Complete the specialists in `coordinator.py`
 
-The Coordinator is the group chat **manager** — the single brain that decides which specialist speaks each round and writes the final answer. `coordinator.py` ships as a starter scaffold with `TODO`s — you fill in the instruction constants and the per-specialist capability slices, while the `GroupChatBuilder` graph below comes pre-wired. `GroupChatBuilder` registers the participants, wires the manager between them, and — every round — asks the manager (via a structured response) who should speak next or whether to stop. It lives in `agent_framework.orchestrations` — a separate `agent-framework-orchestrations` package, already added to `requirements.txt` for this step. Each specialist is a normal `Agent` — the same constructor from Steps 4–6 — with a sliced `tools` list and, where relevant, sliced `context_providers` (RAG for Hotels and Activities, plus the skills provider for Activities). This is where the `agents/*/agent.yaml` slices become executable: their `instructions:` turn into the string constants below, their `description:` into each specialist's `description=` (the manager reads it when choosing a speaker), and their tool/RAG/skill lists into the hand-written `tools=[...]`/`context_providers=[...]` arguments.
+The Coordinator is the group chat **manager** — the single brain that decides which specialist speaks each round and writes the final answer. `coordinator.py` was delivered **almost complete** when you advanced: the instruction constants (already translated from the `agents/*/agent.yaml` slices), your Step 5 `_build_search_provider`, your Step 6 `run_local_skill_script` + `_build_skills_provider`, the manager `Coordinator`, and the `GroupChatBuilder` graph are all wired. `GroupChatBuilder` — from `agent_framework.orchestrations`, a separate `agent-framework-orchestrations` package already in `requirements.txt` — registers the participants, wires the manager between them, and every round asks the manager (via a structured response) who speaks next or whether to stop.
 
-**How the manager picks a speaker.** `GroupChatBuilder` builds the selection prompt for you: each round it shows the manager the conversation plus the list of participant **names and `description`s**, and asks it to return a structured decision — the next speaker, or *terminate* with a final message. So the specialist `description=` fields do the routing work here (keep them crisp), and `COORDINATOR_INSTRUCTIONS` sets the manager's *policy*: gather order, when to finish, and how to write the final answer. You don't hand-write any speaker-selection tools — the builder handles that.
+**Your job is the single `TODO`: turn the `agents/*` slices into the specialists.** `FlightsSpecialist` is already written in the file as the worked example; you add `HotelsSpecialist` and `ActivitiesSpecialist`. That translation *is* the lesson of this step — capability slicing is what makes a multi-agent system more than three copies of the same agent.
 
-**Now open `travel_assistant/coordinator.py` and fill in its `TODO`s using the slices you just read.** The scaffold constructs the `Coordinator` and imports the essentials; as you carry your Step 5 RAG and Step 6 skills providers over, add any imports they need (for example `Path`, your skills-provider type). You supply:
+Each specialist is a normal `Agent` — the same constructor as Steps 4–6 — with a sliced `tools` list and, where relevant, sliced `context_providers`. Each slice is a **pair** of files: `agents/<name>/agent.yaml` holds the role (name, description, instructions) and `agents/<name>/agent.manifest.yaml` holds the capabilities (tools, rag, skills). Read both and map them across:
 
-- the three **specialist** instruction constants (`FLIGHTS_`, `HOTELS_`, `ACTIVITIES_INSTRUCTIONS`) — copy each specialist's `instructions:` block from its `agents/<name>/agent.yaml`;
-- the **`COORDINATOR_INSTRUCTIONS`** constant — there's no Coordinator slice, so you write this one. It's the manager's brief; make it cover:
-  - **Role:** you are TravelBuddy's Coordinator, the manager of a group chat between the three specialists — read the conversation, pick who speaks next, or terminate with the final answer.
-  - **Routing rules,** one line per specialist, matching each slice's `description`: Flights → timing, airports, routes, layovers, weather risk, fares; Hotels → lodging areas, budgets, amenities, neighbourhood trade-offs; Activities → experiences, day trips, destination guidance, day-by-day itineraries, PDF guide.
-  - **Full-trip behaviour:** for a complete plan, gather flight and hotel details first, then choose the **Activities** specialist **last** — it owns the `travel-guide` (PDF) and `response-guardrails` skills, so it folds the plan into the itinerary, produces the final deliverable, and runs the guardrail check. When you terminate, include Activities' guarded guide and its PDF link **verbatim** in your final answer — don't rewrite or drop them.
-  - **Managing the chat:** pick the one specialist who owns the next missing piece, and let each finish before choosing the next. Terminate once the request is fully answered. If a required detail is missing and blocks progress, terminate and ask the traveler that one question directly, rather than looping a specialist. You never call tools yourself — only the specialists do.
-- the carried `search` RAG provider (from Step 5) for Hotels and Activities, and the `skills` provider (from Step 6) for the **Activities** specialist — it owns the `travel-guide` + `response-guardrails` skills (attach it to the specialist, not the manager, whose turn is only a routing decision — see the callout above);
-- the three specialist `Agent(...)`s — translate each `agents/<name>/agent.manifest.yaml` slice into `tools=[...]` and `context_providers=[...]` (function tools + toolbox → `tools`; `rag` → `search`), and set each one's `description=` from its `agent.yaml`. The Activities manifest also carries the two `skills`; attach the `skills` provider alongside its `search` provider (`context_providers=[search, skills]`). The Coordinator/manager itself takes **no tools and no context providers**.
+| Slice field | `Agent(...)` argument |
+| --- | --- |
+| `agent.yaml` → `name:` | `name=` — the manager routes by name |
+| `agent.yaml` → `description:` | `description=` — feeds the manager's routing prompt |
+| `agent.yaml` → `instructions:` | `instructions=<the matching *_INSTRUCTIONS constant>` |
+| `agent.manifest.yaml` → `tools:` | `tools=[...]` — the function tools from `tools.py` plus `toolbox` |
+| `agent.manifest.yaml` → `rag:` | `context_providers=[search]` |
+| `agent.manifest.yaml` → `skills:` | `context_providers=[search, skills]` (Activities only) |
 
-The `GroupChatBuilder` graph and its `return workflow.as_agent()` are **already wired in the scaffold** — it references `flights`, `hotels`, and `activities`, so once you define those three specialists the Coordinator is complete.
+`FlightsSpecialist` is already written in the file as the worked example. Add the other two the same way:
 
-Carry `default_options={"store": False}` over to every participant, exactly as in Steps 1–6 — the hosting layer manages history, so none of the agents should persist their responses server-side.
+- **`hotels`** — `tools=[convert_currency, toolbox]`, `context_providers=[search]`.
+- **`activities`** — `tools=[toolbox]`, `context_providers=[search, skills]`. It owns the deliverable: the `travel-guide` PDF and the `response-guardrails` check (attached to this participant, not the manager, whose turn is only a routing decision — see the callout above).
+
+Give both `default_options={"store": False}`, exactly like the delivered `flights` — the hosting layer manages history, so no agent should persist its responses server-side.
+
+**How the manager picks a speaker.** `GroupChatBuilder` builds the selection prompt for you: each round it shows the manager the conversation plus the participants' **names and `description`s**, and asks for a structured decision — the next speaker, or *terminate* with a final message. So the `description=` fields you write do the routing work here (keep them crisp), while `COORDINATOR_INSTRUCTIONS` (delivered) sets the manager's *policy*: gather order, when to finish, and how to write the final answer. You don't hand-write any speaker-selection tools.
+
+Read `COORDINATOR_INSTRUCTIONS` before you run — it's the manager's brief, and the one constant with no slice behind it: it states the role, one routing rule per specialist, "for a full trip gather flights and hotels first, then choose Activities **last**", "include Activities' guarded guide and its PDF link verbatim", and "you never call tools yourself".
+
+Notice its **"Plan first, ask almost never"** section, and the matching "never stop to ask" boundary in each specialist. Without them a manager-led chat degenerates into an interrogation: asked for a Tokyo trip with no departure date, the model happily terminates with "what are your dates, how many travelers, which cabin class?" and the traveler answers three questions before seeing a plan. Telling every agent to assume a sensible default — and to *label* the assumption so a follow-up can correct it — is what makes the first turn produce an actual itinerary. The split is deliberate: **specialists never ask** — a detail with no default, like the departure city, is reported as missing, not requested — while the **Coordinator may close with exactly one** no-substitute question, and only after delivering the plan it could build. Prompting a multi-agent system is mostly this: deciding what each agent does when information is missing.
 
 The pre-wired builder is what makes this a manager-led chat rather than a fixed pipeline:
 
 - `orchestrator_agent=coordinator` makes the Coordinator the manager that selects the next speaker each round.
-- `participants=[flights, hotels, activities]` are the specialists the manager can pick from.
+- `participants=[flights, hotels, activities]` are the specialists the manager can pick from — which is why the graph only runs once you've defined all three.
 - `max_rounds=40` caps the number of orchestrator rounds. The round counter is checkpoint-restored, so this cap is **cumulative across the whole conversation**, not per turn — a normal turn terminates well before it, and `40` leaves ample headroom for a multi-turn planning session while still stopping a manager that never terminates. (A very long conversation could eventually exhaust it; if a late follow-up returns a bare "max rounds reached" result, start a fresh conversation or raise the cap.)
 - `workflow.as_agent()` wraps the multi-agent runtime so the rest of the app treats it like a single hosted agent.
 
@@ -124,16 +133,33 @@ Because the toolbox is one bundle (web search + Code Interpreter + OctoTrip flig
 
 ### 3. Point `main.py` at the Coordinator
 
-`main.py` collapses to constructing the Coordinator and hosting it through the same adapter as before. Edit your existing `travel_assistant/main.py` in place:
+`main.py` collapses to constructing the Coordinator and hosting it through the same adapter as before — everything else moved into `coordinator.py`. **Replace your Step 6 `travel_assistant/main.py` with this:**
 
-- **Import** `build_travel_coordinator` from `coordinator` (instead of your Step 6 agent builder).
-- In `main()`, **build the agent** with `agent = build_travel_coordinator()` — the group chat, exposed as one agent — and host it with `ResponsesHostServer(agent).run()`, exactly as before.
+```python
+# travel_assistant/main.py
+from agent_framework_foundry_hosting import ResponsesHostServer
 
-Everything else in `main.py` is unchanged. If you moved the `run_local_skill_script` runner and the skill-download helpers into `coordinator.py`, delete their now-unused copies from `main.py`.
+from coordinator import build_travel_coordinator
+
+
+def main() -> None:
+    # The Coordinator + specialists group chat is exposed as a single agent, so the
+    # rest of the hosting stack is unchanged from earlier steps.
+    agent = build_travel_coordinator()
+    ResponsesHostServer(agent).run()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+Your Step 6 skills plumbing — `run_local_skill_script`, `TrustedSkillsProvider`, and the skill-download helpers — now lives in `coordinator.py`, so deleting the old `main.py` body drops nothing you still need. `tools.py`, `skills/`, and the manifests stay exactly where they are.
 
 ### 4. Update the manifest
 
-Metadata-only: append the `Multi-Agent` tag to your existing `tags` (if you kept the Foundry skill you'll also already have `Foundry Skills` from Step 6), update the `description`, and add a `group_chat` block naming the manager + specialists. No new `template.environment_variables`; `resources` stays `[]`.
+Metadata-only: append the `Multi-Agent` tag to your existing `tags` (if you kept the Foundry skill you'll also already have `Foundry Skills` from Step 6), update the `description` to mention the group chat, and add a `group_chat` block naming the manager + specialists. No new `template.environment_variables`; `resources` stays `[]`.
+
+> **Keep `description` under 512 characters.** Foundry validates the agent description on deploy and rejects anything longer with `400 invalid_payload — String length … exceeds maximum 512`. The description has grown with every step, so trim it as you extend it rather than only appending.
 
 ```yaml
 # travel_assistant/agent.manifest.yaml (delta)
@@ -233,6 +259,10 @@ That's a **handoff** symptom, and it's exactly why this step uses **group chat**
 
 If you're adapting an older handoff-based Step 7 and see this error, the fix is to move to the group chat shape in this step (or, if you must keep the handoff, terminate each turn instead of parking). For background on the parked-request protocol, see the Agent Framework [handoff orchestration docs](https://learn.microsoft.com/agent-framework/user-guide/agent-orchestration/handoff).
 
+### The Coordinator asks questions instead of planning
+
+If the first turn comes back with "what are your dates, how many travelers, which cabin class?", the manager is treating missing details as blocking. Check that `COORDINATOR_INSTRUCTIONS` still carries its **"Plan first, ask almost never"** section and that each specialist keeps its "never stop to ask the traveler for details … assume the obvious default and label it as an assumption" boundary. Agents default to asking; you have to tell them to assume. One question is by design, though: if you never said where you're flying from, the Coordinator is allowed to close with that single question — *after* the rest of the plan.
+
 ### Coordinator picks the wrong specialist
 
 The manager chooses the next speaker from each participant's **`description`** plus `COORDINATOR_INSTRUCTIONS`. Make each specialist `description` unambiguous and each name descriptive, and keep the routing rules in the Coordinator's brief crisp. If the manager consistently picks wrong or terminates too early, strengthen those rules. A weak model can also be the cause: on this multi-agent step the shared context grows quickly, and `-mini` deployments often mis-route — if your prompts already look right, try a full-size model deployment (see the model tip at the top of this step).
@@ -247,7 +277,15 @@ Tighten that specialist's boundary text — e.g. Flights should explicitly say i
 
 ### Imports fail after adding `coordinator.py`
 
-Keep import names aligned with the files you created in Steps 5–6. `coordinator.py` reuses `tools.py`, the `AzureAISearchContextProvider` wiring from Step 5, and the `run_local_skill_script` runner from Step 6 — if you renamed any of those, update the imports.
+The delivered `coordinator.py` imports `get_weather`, `get_local_time`, and `convert_currency` from your `tools.py`, and expects your local skills in `skills/`. If you renamed either in Steps 2–6, update the import (or the `LOCAL_SKILLS_DIR` path) at the top of `coordinator.py` to match.
+
+### Deploy fails with `400 invalid_payload` on `description`
+
+```text
+"message": "String length 568 exceeds maximum 512", "param": "description"
+```
+
+Foundry caps the agent `description` at **512 characters**. The manifest description grows with every step, so trim it — describe the shape of the agent, not every tool — and re-run `azd ai agent init` before `azd deploy`.
 
 ### Deploy didn't pick up my change
 

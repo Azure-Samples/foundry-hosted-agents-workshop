@@ -1,7 +1,6 @@
 # travel_assistant/coordinator.py
 import asyncio
 import io
-import logging
 import os
 import shutil
 import subprocess
@@ -31,9 +30,6 @@ from tools import convert_currency, get_local_time, get_weather
 
 load_dotenv(override=True)
 
-logger = logging.getLogger(__name__)
-
-
 # In Steps 8-9 the workflow (workflow.py) is the runtime — main.py hosts it, and it
 # builds its agent nodes from the specialist factories below. The finalize_itinerary
 # node owns the final deliverable (travel-guide PDF + response-guardrails); see
@@ -46,13 +42,15 @@ Scope:
 - Always report concrete fares/prices for the flights you recommend, and convert them to the traveler's currency when asked.
 
 Tools (always use these rather than answering from memory):
-- Flight search in the toolbox for real routes, times, and fares. If no departure date is given, call get_local_time first and use the date part of its iso_time as today's date.
+- Flight search in the toolbox for real routes, times, and fares. If no departure date is given, call get_local_time first, use the date part of its iso_time as today's date, and search an outbound about four weeks out. Search the return leg separately, using the requested trip length (three nights if unstated), and price the two legs together.
 - get_weather when travel timing or disruption risk matters.
 - convert_currency when the traveler gives or asks for prices in another currency.
 
 Boundaries:
 - Do not choose hotels or activities.
-- Cover only the flight part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer. If a detail you need is missing, say what's missing instead of guessing."""
+- Never invent a departure city. If the traveler didn't give one, give the flight guidance that doesn't depend on it (best booking window, the usual airports and routings into the destination, and a rough fare range), and say plainly that a concrete route and fare need their departure city.
+- Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — one traveler, economy, and a round trip departing about four weeks out for the requested trip length (three nights if unstated) — and label it as an assumption in your findings so it can be corrected later.
+- Cover only the flight part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer."""
 
 HOTELS_INSTRUCTIONS = """You are the Hotels specialist for TravelBuddy.
 
@@ -68,7 +66,8 @@ Tools (always use these rather than answering from memory):
 Boundaries:
 - Do not invent live availability.
 - Do not plan full-day activities unless they affect neighbourhood choice.
-- Cover only the lodging part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer. If a detail you need is missing, say what's missing instead of guessing."""
+- Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — one room, mid-range budget, and the trip dates already in the conversation — or, if none are there yet, the requested trip length (three nights if unstated) starting about four weeks out — and label it as an assumption in your findings so it can be corrected later.
+- Cover only the lodging part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer."""
 
 ACTIVITIES_INSTRUCTIONS = """You are the Activities specialist for TravelBuddy.
 
@@ -81,7 +80,8 @@ Tools (always use these rather than answering from memory):
 
 Boundaries:
 - Do not choose flights or hotels.
-- Cover only the activities part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer. If the itinerary needs a flight or hotel detail that isn't available yet, say what's missing instead of guessing."""
+- Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — a moderate pace, a mix of food, culture, and outdoor options, and the requested trip length (three nights if unstated, so schedule the arrival day, the full days between, and the departure day) — and label it as an assumption.
+- Cover only the activities part, then stop — do not assemble the complete trip plan and don't address the traveler directly. Your findings are passed to downstream steps that consolidate the plan and write the traveler-facing answer."""
 
 
 def run_local_skill_script(

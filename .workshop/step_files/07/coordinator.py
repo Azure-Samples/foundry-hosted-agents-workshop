@@ -1,94 +1,310 @@
 """TravelBuddy multi-agent Coordinator — build the group chat.
 
-Fill in the TODOs below by reading the delivered slices, following
-docs/steps/07-multi-agent.md.
+Everything you already wrote in earlier steps is carried over for you: the
+instruction constants (translated from the ``agents/<name>/`` slices), the Step 5
+RAG provider, the Step 6 trusted script runner and skills provider, the manager
+``Coordinator``, and the ``GroupChatBuilder`` graph.
+
+**Your job is the one TODO below: complete the specialist block.** ``FlightsSpecialist``
+is written for you as the worked example — add ``HotelsSpecialist`` and
+``ActivitiesSpecialist`` the same way, by reading each ``agents/<name>/`` slice pair
+(``agent.yaml`` for the role, ``agent.manifest.yaml`` for the capabilities) and
+translating it into an ``Agent(...)``.
+That capability slicing is what this step teaches. Follow Step 7 in the root
+``README.md``.
 
 The per-specialist ``agents/<name>/agent.yaml`` + ``agent.manifest.yaml`` slices
-are already written for you and *describe* each specialist's role and capability
-boundary, but nothing loads them at runtime. **This file is the executable
-source of truth** — you translate each slice into code here:
-
-- ``agents/<name>/agent.yaml`` -> the ``*_INSTRUCTIONS`` constant below
-  (its ``instructions:`` block) and the specialist's ``description=`` argument
-  (its ``description:`` line).
-- ``agents/<name>/agent.manifest.yaml`` -> that specialist's ``tools=[...]`` and
-  ``context_providers=[...]`` arguments (its ``tools`` / ``rag`` / ``skills``).
-
-Keep the two in sync: the slice is the reviewable contract, this file is what runs.
+*describe* each specialist's role and capability boundary, but nothing loads them
+at runtime — **this file is the executable source of truth**, so keep the two in
+sync: the slice is the reviewable contract, this file is what runs.
 
 Stuck? The complete, runnable version lives at
-.workshop/solutions/07-multi-agent/travel_assistant/coordinator.py — including
-the full skills provider that also downloads the Foundry response-guardrails
-skill from the project at startup.
+.workshop/solutions/07-multi-agent/travel_assistant/coordinator.py.
 """
 
-from __future__ import annotations
-
+import asyncio
+import io
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+from typing import Any
 
-from agent_framework import Agent
+from agent_framework import (
+    Agent,
+    FileSkill,
+    FileSkillScript,
+    Skill,
+    SkillScript,
+    SkillsProvider,
+)
 from agent_framework.azure import AzureAISearchContextProvider
 from agent_framework.foundry import FoundryChatClient
 from agent_framework.orchestrations import GroupChatBuilder
 from agent_framework_foundry_hosting import FoundryToolbox
+from azure.ai.projects.aio import AIProjectClient
 from azure.identity import DefaultAzureCredential
+from azure.identity.aio import DefaultAzureCredential as AsyncDefaultAzureCredential
 from dotenv import load_dotenv
 
 from tools import convert_currency, get_local_time, get_weather
 
-# main.py collapses to hosting the Coordinator this step, so load .env here
-# (carry this over from your Step 6 main.py).
 load_dotenv(override=True)
 
-# TODO: carry run_local_skill_script over from your Step 6 main.py so the
-# Activities specialist can run the local travel-guide skill (it renders the final
-# PDF trip guide), and build the SkillsProvider that serves it. If you built the
-# Foundry response-guardrails skill in Step 6, serve it here too so Activities can
-# guardrail its answer; if you skipped it (no public-network Foundry project), serve
-# only the local skill and drop the response-guardrails line from ACTIVITIES_INSTRUCTIONS.
-# Why Activities and not the Coordinator? The Coordinator is the group chat MANAGER: it
-# returns a structured next-speaker/terminate decision each round, so a skill it carried
-# wouldn't reliably fire. The skills therefore ride on the Activities participant.
-# Step 8's workflow adds a dedicated finalize node that owns the deliverable outright.
+# The Coordinator is the group chat MANAGER (the GroupChatBuilder orchestrator): each
+# round it reads the conversation and returns a STRUCTURED routing decision
+# (which specialist speaks next, or terminate with the final answer). The framework
+# doesn't strip a manager's tools, but a skill it carried wouldn't reliably fire —
+# its turn produces that routing decision, not a free tool-driven answer — so, unlike
+# Steps 1-6, this Coordinator deliberately has no tools and no context providers.
+# The final deliverable — the travel-guide PDF and the response-guardrails check —
+# therefore rides on the Activities specialist (a group chat participant that owns the
+# skills provider). The manager selects Activities last and relays its guarded guide as
+# the final answer. Step 8's workflow adds a dedicated finalize node that CAN own the
+# deliverable and guard the actual final synthesis. See the Step 7 doc for the full
+# explanation.
+COORDINATOR_INSTRUCTIONS = """You are TravelBuddy's Coordinator — the manager of a group chat between three specialists (FlightsSpecialist, HotelsSpecialist, ActivitiesSpecialist). Read the traveler's request and the conversation so far, then decide who should speak next, or whether the plan is complete.
+
+Routing:
+- FlightsSpecialist: flight timing, airports, routes, layovers, weather risk, arrival windows, and fare-related currency questions.
+- HotelsSpecialist: lodging areas, budgets, amenities, and neighbourhood trade-offs.
+- ActivitiesSpecialist: experiences, day trips, destination guidance, day-by-day itineraries, and the downloadable PDF trip guide.
+
+Managing the conversation:
+- Pick the ONE specialist who owns the next missing piece of the answer, and let each specialist finish before you choose the next one.
+- For a complete trip plan, gather flight and hotel details first, then choose ActivitiesSpecialist LAST so it folds everything into the itinerary, produces the final PDF trip guide, and runs the response-guardrails check.
+- Terminate once the traveler's request is fully answered. When you terminate, write the final answer for the traveler: present the complete plan, and include the ActivitiesSpecialist's guarded guide and its PDF link verbatim — do not rewrite or drop them.
+- You never call tools yourself — only the specialists do. You route and synthesize.
+
+Plan first, ask almost never:
+- Do NOT interrogate the traveler. Missing details are normal — route to a specialist and let it plan with sensible defaults (one traveler, economy, a three-night trip departing about four weeks out, mid-range budget), then surface those assumptions in your final answer so the traveler can correct them in a follow-up.
+- Never ask about dates, traveler count, cabin class, or budget: those always have a reasonable default.
+- Never open with a question. If a detail has no substitute — the destination, or the departure city when the traveler wants concrete flights — deliver the rest of the plan first, then close with that ONE question. Never repeat a question you already asked."""
+
+FLIGHTS_INSTRUCTIONS = """You are the Flights specialist for TravelBuddy.
+
+Scope:
+- Compare flight timing, routing, nearby airports, layovers, and arrival windows.
+- Always report concrete fares/prices for the flights you recommend, and convert them to the traveler's currency when asked.
+
+Tools (always use these rather than answering from memory):
+- Flight search in the toolbox for real routes, times, and fares. If no departure date is given, call get_local_time first, use the date part of its iso_time as today's date, and search an outbound about four weeks out. Search the return leg separately, using the requested trip length (three nights if unstated), and price the two legs together.
+- get_weather when travel timing or disruption risk matters.
+- convert_currency when the traveler gives or asks for prices in another currency.
+
+Boundaries:
+- Do not choose hotels or activities.
+- Never invent a departure city. If the traveler didn't give one, give the flight guidance that doesn't depend on it (best booking window, the usual airports and routings into the destination, and a rough fare range), and say plainly that a concrete route and fare need their departure city.
+- Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — one traveler, economy, and a round trip departing about four weeks out for the requested trip length (three nights if unstated) — and label it as an assumption in your findings so it can be corrected later.
+- Cover only the flight part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly."""
+
+HOTELS_INSTRUCTIONS = """You are the Hotels specialist for TravelBuddy.
+
+Scope:
+- Recommend neighbourhoods and lodging trade-offs.
+- Respect budget, dates, accessibility, room type, and must-have amenities.
+
+Tools (always use these rather than answering from memory):
+- Grounded destination knowledge (the destinations index) before recommending neighbourhoods or areas.
+- The toolbox's web search for current rates, availability signals, and source-backed lodging guidance.
+- convert_currency for nightly budgets and total-stay estimates.
+
+Boundaries:
+- Do not invent live availability.
+- Do not plan full-day activities unless they affect neighbourhood choice.
+- Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — one room, mid-range budget, and the trip dates already in the conversation — or, if none are there yet, the requested trip length (three nights if unstated) starting about four weeks out — and label it as an assumption in your findings so it can be corrected later.
+- Cover only the lodging part, then stop — the Coordinator manages the group chat and decides who speaks next. The Coordinator is the one who talks to the traveler, so report your findings for the Coordinator rather than addressing the traveler directly."""
+
+# Activities owns the final deliverable in Step 7 (see the Coordinator note above): the
+# LOCAL travel-guide skill (always present) renders the PDF trip guide, and the FOUNDRY
+# response-guardrails skill checks the answer. If you skipped the Foundry skill in Step 6,
+# drop the response-guardrails line below and serve only the local skill — see the Step 7 doc.
+ACTIVITIES_INSTRUCTIONS = """You are the Activities specialist for TravelBuddy.
+
+Scope:
+- Suggest experiences, day trips, food areas, museum days, outdoor options, and rainy-day alternatives.
+- Produce the trip's downloadable, shareable PDF guide once the plan is clear.
+
+Tools (always use these rather than answering from memory):
+- Grounded destination knowledge (the destinations index) before making specific recommendations.
+- The toolbox's web search for current events, advisories, and source-backed guidance.
+
+Skills (always use these):
+- Use the travel-guide skill to turn the plan into a downloadable, shareable PDF trip guide.
+- Apply the response-guardrails skill to every response you produce.
+
+Boundaries:
+- Do not choose flights or hotels.
+- Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — a moderate pace, a mix of food, culture, and outdoor options, and the requested trip length (three nights if unstated, so schedule the arrival day, the full days between, and the departure day) — and label it as an assumption.
+- You are usually chosen LAST, so fold the flight and hotel details already in the conversation into the itinerary and the final PDF guide. Then stop — the Coordinator relays your guarded guide to the traveler."""
 
 
-# --- Instruction constants --------------------------------------------------
-# The three specialist constants come straight from agents/<name>/agent.yaml.
-# The Coordinator has NO slice — you write it. These are what the runtime uses;
-# keep the specialist ones aligned with their slices.
-#
-# TODO: write COORDINATOR_INSTRUCTIONS (the manager's brief). Cover:
-#   - Role: you are the manager of a group chat between the three specialists —
-#     read the conversation, pick who speaks next, or terminate with the final answer.
-#   - Routing rules (one line each, matching each slice's `description`):
-#       Flights -> timing, airports, routes, layovers, weather risk, fares
-#       Hotels  -> lodging areas, budgets, amenities, neighbourhood trade-offs
-#       Activities -> experiences, day trips, destination guidance, itineraries, PDF guide
-#   - Full trip: gather flights and hotels first, then choose Activities LAST so it
-#     folds everything into the itinerary, produces the PDF, and runs the guardrails check.
-#   - Terminate when the request is fully answered, and when you do, write the final
-#     answer for the traveler — include the Activities guarded guide and its PDF link
-#     verbatim (don't rewrite or drop them).
-#   - If a blocking detail is missing, terminate and ask the traveler that one question
-#     directly, rather than looping a specialist.
-#   - You never call tools yourself — only the specialists do; you route and synthesize.
-#   (The Coordinator is the manager — the travel-guide PDF and response-guardrails
-#    ride on the Activities specialist, not here; see the skills TODO above.)
-COORDINATOR_INSTRUCTIONS = ""
-FLIGHTS_INSTRUCTIONS = ""      # TODO: from agents/flights/agent.yaml — flights only; report findings, then stop.
-HOTELS_INSTRUCTIONS = ""       # TODO: from agents/hotels/agent.yaml — lodging only; use destinations RAG + toolbox web search + currency.
-ACTIVITIES_INSTRUCTIONS = ""   # TODO: from agents/activities/agent.yaml — experiences, day trips, itinerary; toolbox web search + destinations RAG + the travel-guide/response-guardrails skills.
+def run_local_skill_script(
+    skill: Skill, script: SkillScript, args: dict[str, Any] | list[str] | None = None
+) -> str:
+    """Run a trusted file-based skill script with positional CLI arguments."""
+    if not isinstance(skill, FileSkill) or not isinstance(script, FileSkillScript):
+        return "Error: only file-based skill scripts can be run by this runner."
+
+    skill_path = Path(skill.path).resolve()
+    script_path = Path(script.full_path).resolve()
+    if skill_path != script_path and skill_path not in script_path.parents:
+        return f"Error: script '{script.name}' resolves outside the skill directory."
+
+    command = [sys.executable, str(script_path)]
+    if isinstance(args, list):
+        for item in args:
+            if not isinstance(item, str):
+                return (
+                    f"Error: script '{script.name}' only accepts string CLI arguments, "
+                    f"but received a {type(item).__name__}."
+                )
+        command.extend(args)
+    elif args is not None:
+        return (
+            f"Error: script '{script.name}' expects positional CLI arguments as a list "
+            f"of strings, but received {type(args).__name__}."
+        )
+
+    try:
+        completed = subprocess.run(
+            command, cwd=skill_path, capture_output=True, check=False, text=True, timeout=60
+        )
+    except subprocess.TimeoutExpired:
+        return f"Error: script '{script.name}' timed out after 60 seconds."
+
+    if completed.returncode != 0:
+        details = completed.stderr.strip() or completed.stdout.strip() or "no error output was produced."
+        return f"Error: script '{script.name}' failed with exit code {completed.returncode}: {details}"
+    return completed.stdout.strip() or f"Script '{script.name}' completed successfully."
+
+
+class TrustedSkillsProvider(SkillsProvider):
+    """A ``SkillsProvider`` that runs its skill tools without an approval gate.
+
+    agent-framework registers every skill tool (``load_skill``,
+    ``read_skill_resource``, ``run_skill_script``) with
+    ``approval_mode="always_require"``. The documented opt-out,
+    ``ToolApprovalMiddleware``, needs an ``AgentSession``, which the hosted
+    ``ResponsesHostServer`` does not provide -- so an unattended run would stall
+    on an approval request. These skills are authored in this repo (and the
+    trusted runner is armed for local skills only), so we register their tools
+    without the gate.
+
+    Workshop shortcut, not a production pattern: disabling approval lets the
+    hosted agent run unattended, but it trades away the human review that guards
+    ``run_skill_script`` from executing untrusted code. In production, keep the
+    gate and run the agent in a client flow that supplies an ``AgentSession`` so
+    each script call can be approved by a human (or a policy). Use
+    ``never_require`` only for skills whose provenance you fully control.
+    """
+
+    def _create_tools(self, skills):
+        tools = super()._create_tools(skills)
+        for tool in tools:
+            tool.approval_mode = "never_require"
+        return tools
 
 
 def _build_search_provider(credential) -> AzureAISearchContextProvider:
-    """Carried from Step 5 — the destinations RAG context provider."""
-    # TODO: return the Step 5 AzureAISearchContextProvider
-    # (AZURE_AI_SEARCH_ENDPOINT / AZURE_AI_SEARCH_INDEX_NAME, mode="semantic", top_k=3).
-    raise NotImplementedError("TODO: build the destinations RAG provider (see Step 5).")
+    endpoint = os.environ["AZURE_AI_SEARCH_ENDPOINT"]
+    index_name = os.environ["AZURE_AI_SEARCH_INDEX_NAME"]
+    return AzureAISearchContextProvider(
+        source_id="travelbuddy_destinations",
+        endpoint=endpoint,
+        index_name=index_name,
+        credential=credential,
+        mode="semantic",
+        top_k=3,
+    )
+
+
+LOCAL_SKILLS_DIR = Path(__file__).parent / "skills"
+# The deployed container's app directory is read-only, so download into the OS
+# temp dir (writable both locally and in the hosted container).
+FOUNDRY_DOWNLOADED_SKILLS_DIR = Path(tempfile.gettempdir()) / "foundry_downloaded_skills"
+SKILL_DOWNLOAD_TIMEOUT_SECONDS = 60.0
+
+
+def _foundry_skill_names() -> list[str]:
+    """Parse FOUNDRY_SKILL_NAMES, treating an unresolved ${VAR}/{{VAR}} as empty."""
+    raw = os.environ.get("FOUNDRY_SKILL_NAMES", "").strip()
+    if (raw.startswith("${") and raw.endswith("}")) or (raw.startswith("{{") and raw.endswith("}}")):
+        raw = ""
+    parsed = [name.strip().strip('"').strip("'") for name in raw.split(",")]
+    return [name for name in parsed if name]
+
+
+def _safe_extract_zip(zf: zipfile.ZipFile, dest_dir: Path) -> None:
+    """Unpack a downloaded skill archive, rejecting entries that escape dest_dir (zip-slip guard)."""
+    dest_root = dest_dir.resolve()
+    for member in zf.infolist():
+        target = (dest_root / member.filename).resolve()
+        if dest_root != target and dest_root not in target.parents:
+            raise RuntimeError(f"Refusing unsafe zip entry '{member.filename}'.")
+    zf.extractall(dest_dir)
+
+
+async def _download_foundry_skills(endpoint: str, names: list[str]) -> None:
+    """Download each named Foundry skill into the temp foundry_downloaded_skills/<name>/ cache."""
+    if FOUNDRY_DOWNLOADED_SKILLS_DIR.exists():
+        shutil.rmtree(FOUNDRY_DOWNLOADED_SKILLS_DIR)
+    FOUNDRY_DOWNLOADED_SKILLS_DIR.mkdir(parents=True)
+    async with (
+        AsyncDefaultAzureCredential() as credential,
+        AIProjectClient(endpoint=endpoint, credential=credential, allow_preview=True) as project,
+    ):
+        for name in names:
+            stream = await project.beta.skills.download(name)
+            data = b"".join([chunk async for chunk in stream])
+            skill_dir = FOUNDRY_DOWNLOADED_SKILLS_DIR / name
+            skill_dir.mkdir()
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                _safe_extract_zip(zf, skill_dir)
+            if not (skill_dir / "SKILL.md").is_file():
+                raise RuntimeError(f"Foundry skill '{name}' has no SKILL.md at its archive root.")
+
+
+def _build_skills_provider() -> TrustedSkillsProvider:
+    """Download the required Foundry skill(s), then serve them and the local skill from ONE provider.
+
+    Carried from your Step 6 ``main.py`` (the Foundry-enabled version). Skipped the
+    Foundry skill in Step 6? Replace this body with your local-only provider and drop
+    the response-guardrails line from ``ACTIVITIES_INSTRUCTIONS`` above.
+
+    The local travel-guide skill needs the trusted ``run_local_skill_script`` runner to
+    execute create_travel_guide.py. Both folders share one ``from_paths`` so their skill
+    tools never collide, but a ``script_filter`` arms the runner for local skills only, so a
+    downloaded (remote) skill can never execute local code even if it shipped a script.
+    """
+    names = _foundry_skill_names()
+    if not names:
+        raise RuntimeError(
+            "FOUNDRY_SKILL_NAMES is empty. Upload the Foundry skill once with "
+            "`python foundry_skills/provision_skills.py`, then set "
+            'FOUNDRY_SKILL_NAMES=response-guardrails so the agent can download it at startup.'
+        )
+    asyncio.run(
+        asyncio.wait_for(
+            _download_foundry_skills(os.environ["AZURE_AI_PROJECT_ENDPOINT"], names),
+            timeout=SKILL_DOWNLOAD_TIMEOUT_SECONDS,
+        )
+    )
+    downloaded_names = set(names)
+    return TrustedSkillsProvider.from_paths(
+        [LOCAL_SKILLS_DIR, FOUNDRY_DOWNLOADED_SKILLS_DIR],
+        script_runner=run_local_skill_script,
+        # Trusted runner is armed for local skills only; a downloaded Foundry skill
+        # (matched by name) can never run a script even if its archive shipped one.
+        script_filter=lambda skill_name, _path: skill_name not in downloaded_names,
+    )
 
 
 def build_travel_coordinator() -> Agent:
-    """Build the Coordinator + specialists group chat and expose it as one agent."""
+    """Build the Coordinator + specialists group chat and expose it as a single agent."""
     credential = DefaultAzureCredential()
     client = FoundryChatClient(
         project_endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
@@ -96,21 +312,19 @@ def build_travel_coordinator() -> Agent:
         credential=credential,
     )
 
-    # Carried capabilities from Steps 4–6, sliced per specialist below.
+    # Carried capabilities from Steps 4-6, wired per agent below. The skills provider
+    # (LOCAL travel-guide + the FOUNDRY response-guardrails skill downloaded at
+    # startup, see _build_skills_provider) rides on the Activities participant —
+    # a skill on the group chat manager (Coordinator) wouldn't reliably fire, since its
+    # turn returns a structured routing decision (see COORDINATOR_INSTRUCTIONS).
     toolbox = FoundryToolbox(credential)
     search = _build_search_provider(credential)
-    # TODO: build the skills provider from your Step 6 code (local travel-guide,
-    # plus the Foundry response-guardrails skill only if you built it in Step 6).
-    # It belongs to the Activities specialist below — that participant owns the final
-    # PDF guide + guardrails (a skill on the manager Coordinator wouldn't reliably fire).
-    # skills = ...
+    skills = _build_skills_provider()
 
-    # Carry default_options={"store": False} over from every earlier step: the hosting
-    # layer manages history, so don't persist responses server-side. Set it on the
-    # Coordinator and all three specialists below.
-    # The Coordinator is the group chat MANAGER (orchestrator_agent): it returns a
-    # structured next-speaker/terminate decision each round, so it has no tools and no
-    # context providers.
+    # The Coordinator is the group chat MANAGER (orchestrator_agent): each round it
+    # returns a structured next-speaker/terminate decision, so it has no tools and no
+    # context providers. The `description` fields on the specialists feed the manager's
+    # auto-generated routing prompt, so keep them crisp.
     coordinator = Agent(
         client=client,
         name="Coordinator",
@@ -118,37 +332,48 @@ def build_travel_coordinator() -> Agent:
         default_options={"store": False},
     )
 
-    # TODO: build the three specialists. Read each agents/<name>/agent.manifest.yaml
-    # to see the exact capability slice, then translate it to Agent(...) arguments:
-    #   - `description:` (agent.yaml) -> description=...   (feeds the manager's routing prompt)
-    #   - `tools:`  -> tools=[...]                         (function tools + the toolbox)
-    #   - `rag:`    -> context_providers=[search]          (the destinations index)
-    #   - `skills:` -> context_providers=[search, skills]  (Activities only)
-    # e.g.:
-    #   flights = Agent(
-    #       client=client, name="FlightsSpecialist",
-    #       description="Handles flight timing, routing, airport, weather-risk, and currency questions.",
-    #       instructions=FLIGHTS_INSTRUCTIONS,
-    #       tools=[get_weather, get_local_time, convert_currency, toolbox],
-    #       default_options={"store": False},
-    #   )
-    #   hotels = Agent(... tools=[convert_currency, toolbox], context_providers=[search],
-    #                  default_options={"store": False})
-    #   activities = Agent(... tools=[toolbox], context_providers=[search, skills],
-    #                      default_options={"store": False})
-
-    # The group chat is wired for you and exposed as a single agent. It refers to
-    # flights/hotels/activities, so define those three specialists above first (and fill
-    # in _build_search_provider) before this runs.
+    # ------------------------------------------------------------------
+    # TODO (the exercise): complete the specialist block — Flights is done,
+    # add Hotels and Activities.
     #
-    # GroupChatBuilder wires the manager (orchestrator_agent) to each participant with
+    # Read each agents/<name>/agent.yaml + agent.manifest.yaml slice and translate
+    # it into an Agent(...) below:
+    #   - `name:`        -> name=...            (the manager routes by name)
+    #   - `description:` -> description=...     (feeds the manager's routing prompt)
+    #   - `instructions:`-> instructions=<the matching constant above>
+    #   - `tools:`       -> tools=[...]         (function tools + `toolbox`)
+    #   - `rag:`         -> context_providers=[search]
+    #   - `skills:`      -> context_providers=[search, skills]   (Activities only)
+    # Give every specialist default_options={"store": False}, exactly as in Steps 1-6.
+    #
+    # The worked example — Flights, from agents/flights/:
+    flights = Agent(
+        client=client,
+        name="FlightsSpecialist",
+        description="Handles flight timing, routing, airport, weather-risk, and currency questions.",
+        instructions=FLIGHTS_INSTRUCTIONS,
+        tools=[get_weather, get_local_time, convert_currency, toolbox],
+        default_options={"store": False},
+    )
+
+    # Now do the same for the other two, from agents/hotels/ and agents/activities/:
+    #   hotels     -> currency + toolbox (web search), grounded by the destinations index.
+    #   activities -> toolbox (web search), grounded by the destinations index, AND the
+    #                 skills provider, so this participant owns the travel-guide PDF and
+    #                 the response-guardrails check.
+    # hotels = Agent(...)
+    # activities = Agent(...)
+    # ------------------------------------------------------------------
+
+    # GroupChatBuilder wires a manager (orchestrator_agent) to each participant with
     # bidirectional edges: every round the Coordinator picks the next specialist or
-    # terminates with the final answer, then the workflow completes (IDLE). Because it
-    # never parks on a request_info, a follow-up question in the same conversation is
-    # just the next run against the restored history — no "Unexpected content type"
-    # error. max_rounds caps the orchestrator rounds; the counter is checkpoint-restored,
-    # so the cap is CUMULATIVE across the whole conversation, not per turn. 40 leaves
-    # ample headroom for a multi-turn session while still stopping a runaway manager.
+    # terminates with the final answer, then the workflow completes (IDLE) — it never
+    # parks on a request_info, so a follow-up question in the same conversation is just
+    # the next run against the restored history. max_rounds caps the number of
+    # orchestrator rounds; note the round counter is checkpoint-restored, so the cap is
+    # CUMULATIVE across the whole hosted conversation, not per turn. A normal turn ends
+    # when the Coordinator terminates well before the cap; 40 leaves ample headroom for a
+    # multi-turn planning session while still stopping a manager that never terminates.
     workflow = (
         GroupChatBuilder(
             participants=[flights, hotels, activities],
@@ -157,4 +382,5 @@ def build_travel_coordinator() -> Agent:
         )
         .build()
     )
+
     return workflow.as_agent()

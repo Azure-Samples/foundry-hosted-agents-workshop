@@ -12,9 +12,8 @@ description: >
   for weather, local time, and currency, a Foundry Toolbox that bundles web search,
   Code Interpreter, and the OctoTrip flights MCP server, RAG grounding over a
   destinations index in Azure AI Search, a local travel-guide Skill that renders a
-  downloadable, grounded PDF trip guide (with a day-by-day itinerary) as a reusable
-  prompt + script, and a Foundry response-guardrails Skill downloaded from the
-  project and shareable across agents.
+  downloadable PDF trip guide, and a Foundry response-guardrails Skill shared from
+  the project.
 metadata:
   tags:
     - Agent Framework
