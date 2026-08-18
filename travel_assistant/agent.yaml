@@ -1,0 +1,25 @@
+# travel_assistant/agent.yaml — AgentDefinition (kind: hosted): the concrete
+# runtime definition for your agent. It names the hosted agent, declares the
+# `responses` protocol, sets a small CPU/memory shape, and lists the environment
+# variables the container needs. This file is ready to run as-is — skim it so you
+# understand each block. Reference:
+# https://learn.microsoft.com/azure/foundry/agents/concepts/agent-yaml-reference
+# yaml-language-server: $schema=https://raw.githubusercontent.com/microsoft/AgentSchema/refs/heads/main/schemas/v1.0/ContainerAgent.yaml
+kind: hosted
+name: ${WORKSHOP_RESOURCE_PREFIX}-travel-buddy
+protocols:
+  - protocol: responses
+    version: 2.0.0
+resources:
+  cpu: "0.25"
+  memory: "0.5Gi"
+environment_variables:
+  # These values come from your .env at run/deploy time — keep the ${...} refs as-is.
+  - name: AZURE_AI_PROJECT_ENDPOINT
+    value: ${AZURE_AI_PROJECT_ENDPOINT}
+  - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+    value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+  # WORKSHOP_RESOURCE_PREFIX keeps your agent's name unique so it doesn't collide
+  # with other attendees deploying into a shared project.
+  - name: WORKSHOP_RESOURCE_PREFIX
+    value: ${WORKSHOP_RESOURCE_PREFIX}

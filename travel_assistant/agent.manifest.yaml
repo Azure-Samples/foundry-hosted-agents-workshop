@@ -1,0 +1,42 @@
+# travel_assistant/agent.manifest.yaml — AgentManifest: a parameterized template
+# that deployment tooling (azd ai agent init / Foundry Toolkit) reads to scaffold
+# your hosted agent. It has top-level metadata (name, description, tags), a
+# `template` block (the hosted-agent definition), and a `resources` list.
+# This file is provided ready to use — skim it so you know what it declares.
+# Reference (each field explained):
+# https://learn.microsoft.com/azure/foundry/agents/concepts/agent-yaml-reference
+# NOTE: `name` (and `template.name` below) must be a hardcoded literal here — do
+# NOT use ${VAR} or {{VAR}}. `azd ai agent init` reads and validates the agent
+# name as-is, BEFORE any substitution: it never expands ${VAR} (those resolve later
+# at deploy/run from .env / Bicep outputs) and only substitutes {{VAR}} for values
+# declared under a `parameters:` block, which happens AFTER the name is validated.
+# The validator rejects `$`, `{`, and `}`, so a placeholder here fails with
+# "invalid agent name". The runtime-configurable prefix still lives in agent.yaml's
+# `name` and in the WORKSHOP_RESOURCE_PREFIX environment variable below.
+name: travel-buddy
+description: >
+  A basic Agent Framework travel assistant hosted by Foundry.
+metadata:
+  tags:
+    - Agent Framework
+    - AI Agent Hosting
+    - Azure AI AgentServer
+    - Responses Protocol
+    - Travel Assistant
+template:
+  name: travel-buddy
+  kind: hosted
+  protocols:
+    - protocol: responses
+      version: 2.0.0
+  environment_variables:
+    - name: AZURE_AI_PROJECT_ENDPOINT
+      value: ${AZURE_AI_PROJECT_ENDPOINT}
+    - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+      value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+    - name: WORKSHOP_RESOURCE_PREFIX
+      value: ${WORKSHOP_RESOURCE_PREFIX}
+# No provisioned resources: you already deployed a model in setup (Step 0), and the
+# agent selects it at runtime through the AZURE_AI_MODEL_DEPLOYMENT_NAME env var
+# above — so we don't declare a `kind: model` resource for azd to create.
+resources: []
