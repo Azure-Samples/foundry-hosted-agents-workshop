@@ -11,11 +11,9 @@ description: >
   TravelBuddy is an Agent Framework hosted agent exposed as a runtime multi-agent
   group chat: a Coordinator (the manager) picks which of the Flights, Hotels, or
   Activities specialists speaks next each round, then synthesizes the final answer.
-  The specialists share the carried capabilities — function tools, the
-  Foundry Toolbox (web search, Code Interpreter, OctoTrip flights), destination RAG
-  in Azure AI Search, the local travel-guide Skill, and a required Foundry
-  response-guardrails Skill (downloaded from the project and shareable across agents) — sliced
-  per role.
+  The specialists slice the carried capabilities — function tools, the Foundry
+  Toolbox, destination RAG in Azure AI Search, and the travel-guide and
+  response-guardrails Skills.
 metadata:
   tags:
     - Agent Framework

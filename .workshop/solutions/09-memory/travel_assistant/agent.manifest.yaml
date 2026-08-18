@@ -11,10 +11,8 @@ description: >
   TravelBuddy exposed as a durable Agent Framework workflow: a gather step fans the
   request out to the Flights, Hotels, and Activities specialists, a consolidate step
   checkpoints the draft, and a finalize step produces the itinerary. The graph is
-  hosted as one agent via workflow.as_agent(); an optional human-approval gate uses
-  the request/response (request_info) pattern. Each specialist carries a
-  FoundryMemoryProvider, so durable per-user preferences are recalled and updated
-  across conversations.
+  hosted as one agent via workflow.as_agent(). Each specialist carries a
+  FoundryMemoryProvider, so per-user preferences persist across conversations.
 metadata:
   tags:
     - Agent Framework

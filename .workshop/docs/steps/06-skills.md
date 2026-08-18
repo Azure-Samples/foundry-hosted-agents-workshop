@@ -743,6 +743,14 @@ The Foundry-skill download client needs `azure-ai-projects`. Re-run `uv pip inst
 
 That folder is a **runtime cache** in the OS temp dir — `main.py` deletes and re-downloads it every startup. (In the deployed container the app directory is read-only, which is why the download targets the writable temp dir.) Edit the source of truth at `foundry_skills/skills/response-guardrails/SKILL.md` and re-run `provision_skills.py`.
 
+### Deploy fails with `400 invalid_payload` on `description`
+
+```text
+"message": "String length 568 exceeds maximum 512", "param": "description"
+```
+
+Foundry caps the agent `description` at **512 characters**, and the manifest description grows with every step. Trim it — describe the shape of the agent, not every tool — then re-run `azd ai agent init` before `azd deploy`.
+
 ### Deploy didn't pick up my change
 
 `azd ai agent init` **copied** your code into `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`, so edits in `travel_assistant/` don't deploy on their own. Re-run `azd ai agent init` to refresh the snapshot, then `azd deploy` again. (Edits in `foundry_skills/` are out-of-band and never deploy — re-run `provision_skills.py` instead.)

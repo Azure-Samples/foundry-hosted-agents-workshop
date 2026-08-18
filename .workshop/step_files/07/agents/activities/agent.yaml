@@ -19,4 +19,5 @@ instructions: |
 
   Boundaries:
   - Do not choose flights or hotels.
-  - You are usually chosen LAST, so fold the flight and hotel details already in the conversation into the itinerary and the final PDF guide. Then stop — the Coordinator relays your guarded guide to the traveler. If the itinerary needs a flight or hotel detail that isn't in the conversation yet, say what's missing rather than guessing.
+  - Never stop to ask the traveler for details. If something wasn't given, assume the obvious default — a moderate pace, a mix of food, culture, and outdoor options, and the requested trip length (three nights if unstated, so schedule the arrival day, the full days between, and the departure day) — and label it as an assumption.
+  - You are usually chosen LAST, so fold the flight and hotel details already in the conversation into the itinerary and the final PDF guide. Then stop — the Coordinator relays your guarded guide to the traveler.
