@@ -502,7 +502,7 @@ foreach ($SCOPE in @($APP_INSIGHTS, $WORKSPACE)) {
 
 > **Heads up — traces capture prompt and tool content by default.** When deployed, the hosting runtime defaults `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `true`, so the spans you're about to generate include prompts, tool arguments, and model responses. That's great for debugging — and it's what content-based **evaluations** (step 4) read — but treat traces as **sensitive production data** and apply the same access controls you'd give logs. To record only structure (span names, durations, token counts, status) and redact content, add `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "false"` to the `env` map of the `travel-buddy` service in `azure.yaml`, then `azd deploy` from the repo root. Redacting content disables content-based quality evaluators, so keep it on only while you need evaluations. Either way, never put secrets in prompts or tool arguments.
 
-1. Make sure TravelBuddy is deployed — see **item 5 of [Run and deploy TravelBuddy](#run-and-deploy-travelbuddy)** earlier in this step. Already deployed before you connected Application Insights? No redeploy needed — tracing is enabled at the project level.
+1. Make sure TravelBuddy is deployed — see **item 3 (Deploy to Foundry) of [Run and deploy TravelBuddy](#run-and-deploy-travelbuddy)** earlier in this step. Already deployed before you connected Application Insights? No redeploy needed — tracing is enabled at the project level.
 2. Invoke it a few times to produce spans — reuse the [Try it](#try-it) prompts:
 
    <!-- terminal -->

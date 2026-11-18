@@ -244,7 +244,7 @@ python travel_assistant/provision_memory_store.py
 
    <!-- terminal -->
    ```bash
-   azd ai agent invoke --local --message "I always fly out of SEA and prefer window seats on a mid-range budget."
+   azd ai agent invoke --local "I always fly out of SEA and prefer window seats on a mid-range budget."
    ```
 
 3. **Deploy to Foundry:**
@@ -260,7 +260,7 @@ python travel_assistant/provision_memory_store.py
 
    <!-- terminal -->
    ```bash
-   azd ai agent invoke --message "Plan a 4-day trip to Rome for me."
+   azd ai agent invoke "Plan a 4-day trip to Rome for me."
    ```
 
 ## Try it
@@ -269,14 +269,14 @@ Prove memory survives across conversations. First, teach TravelBuddy a durable p
 
 <!-- terminal -->
 ```bash
-azd ai agent invoke --message "Remember I'm vegetarian, I prefer trains over flights, and my home base is Lisbon."
+azd ai agent invoke "Remember I'm vegetarian, I prefer trains over flights, and my home base is Lisbon."
 ```
 
 Then, in a **new** invocation, ask for a plan and watch it apply what it remembers:
 
 <!-- terminal -->
 ```bash
-azd ai agent invoke --message "Plan a long weekend in northern Spain."
+azd ai agent invoke "Plan a long weekend in northern Spain."
 ```
 
 Expect rail-first routing from Lisbon and vegetarian-friendly food suggestions. Ask `What do you remember about me?` and it should list the stored facts. Because the solution sets `update_delay=0`, writes land right away; if you removed that override the default 5-minute debounce applies and recall would lag behind the first call.
