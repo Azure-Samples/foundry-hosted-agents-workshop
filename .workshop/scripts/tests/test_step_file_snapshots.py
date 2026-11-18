@@ -29,5 +29,5 @@ def test_overlaying_step_one_preserves_step_zero_requirements(tmp_path):
     assert requirements.read_bytes() == (
         REPO_ROOT / ".workshop" / "step_files" / "00" / "requirements.txt"
     ).read_bytes()
-    for scaffold in ("agent.yaml", "agent.manifest.yaml", "main.py"):
+    for scaffold in ("main.py", "Dockerfile", ".azdignore"):
         assert (travel_assistant / scaffold).exists()

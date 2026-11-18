@@ -13,17 +13,18 @@ Both skills are served by a **single** `SkillsProvider.from_paths([local, downlo
 
 Four sibling folders plus a shared `.env` (same shape as after advancing to Step 6):
 
-- `travel_assistant/` — the agent. Adds `skills/travel-guide/` (local) and a small startup download in `main.py` that fetches the Foundry skill into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) before serving both via one `SkillsProvider`. This is what `azd ai agent init` snapshots.
+- `travel_assistant/` — the agent. Adds `skills/travel-guide/` (local) and a small startup download in `main.py` that fetches the Foundry skill into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) before serving both via one `SkillsProvider`. This is what `azd deploy` packages into the container; `azure.yaml` (copy it to your repo root) now also passes `SKILL_NAMES`.
 - `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` (from Step 5).
-- `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/`. Never deployed — like `travel_indexer/`, `azd ai agent init` snapshots only `travel_assistant/`.
+- `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/`. Never deployed — like `travel_indexer/`, it sits outside `travel_assistant/`, the only folder `azd deploy` packages.
 - `travel_toolbox/` — the toolbox definition (`toolbox.yaml`), a sibling of `travel_assistant/`.
-- `.env.example` — shared configuration, including `FOUNDRY_SKILL_NAMES`.
+- `azure.yaml` — the azd project file (copy it to your repo root); its `env` map passes `SKILL_NAMES`.
+- `.env.example` — shared configuration, including `SKILL_NAMES`.
 
 **Source-of-truth discipline:** edit `foundry_skills/skills/response-guardrails/SKILL.md`, then re-run `provision_skills.py`. The agent re-downloads the skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) — never edit that copy (it is a throwaway cache, recreated each startup). Two copies is expected, and mirrors the indexer (source JSON vs. the live index).
 
 ## Run it
 
-1. Copy `.env.example` to `.env` and fill in values (Foundry, `TOOLBOX_ENDPOINT`, the two `AZURE_AI_SEARCH_*` values, and `FOUNDRY_SKILL_NAMES`).
+1. Copy `.env.example` to `.env` and fill in values (Foundry, `TOOLBOX_ENDPOINT`, the two `AZURE_AI_SEARCH_*` values, and `SKILL_NAMES`).
 2. Sign in with Entra ID: `az login`. Uploading and downloading Foundry skills needs **Foundry User** (formerly Azure AI User) on the Foundry project, and the account must allow **public network access** (the Skills API does not support private networking).
 3. Install dependencies: `pip install -r travel_assistant/requirements.txt`.
 4. Provision the destinations index once (from Step 5): `python travel_indexer/provision_index.py`.

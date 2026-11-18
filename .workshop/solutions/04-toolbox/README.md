@@ -8,8 +8,9 @@ Keeps the Step 2 function tools (`get_weather`, `get_local_time`, `convert_curre
 
 This solution mirrors the repo layout after advancing to Step 4 — two sibling folders plus a shared `.env`:
 
-- `travel_assistant/` — the agent (`main.py`, `tools.py`, `agent.yaml`, `agent.manifest.yaml`, `requirements.txt`, `Dockerfile`, `data/itinerary.csv`). This is what `azd ai agent init` snapshots.
-- `travel_toolbox/` — the toolbox definition (`toolbox.yaml`). It lives in its own folder, a sibling of `travel_assistant/`, so it is never swept into the agent snapshot by `azd ai agent init`.
+- `azure.yaml` — the azd project file (copy it to your repo root). Its `travel-buddy` service points at `travel_assistant/` and lists the agent's environment variables, now including `TOOLBOX_ENDPOINT`.
+- `travel_assistant/` — the agent (`main.py`, `tools.py`, `requirements.txt`, `Dockerfile`, `data/itinerary.csv`). This is what `azd deploy` packages into the container.
+- `travel_toolbox/` — the toolbox definition (`toolbox.yaml`). It lives in its own folder, a sibling of `travel_assistant/`, so it is never packaged into the agent container by `azd deploy`.
 - `.env.example` — shared configuration, a sibling of both folders (mirrors the repo-root `.env`).
 
 ## Run it

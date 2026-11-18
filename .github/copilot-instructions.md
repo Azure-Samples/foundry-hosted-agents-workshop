@@ -90,9 +90,11 @@ focused on the agent they build:
 - **Never edit or commit runtime-download dirs** (e.g.
   `foundry_downloaded_skills/`) - they are git/azd/docker-ignored and
   regenerated at runtime.
-- **Manifests use `resources: []`** unless a step genuinely adds a non-model
-  resource; the model is selected at runtime via
-  `AZURE_AI_MODEL_DEPLOYMENT_NAME`.
+- **One repo-root `azure.yaml`** (azd project file) describes the hosted
+  agent. Steps only add `env` entries to it; the model is never declared there
+  - it is selected at runtime via `AZURE_AI_MODEL_DEPLOYMENT_NAME`, and
+  out-of-band resources (toolbox, search index, skills, memory store) are
+  created by scripts, not by `azd provision`.
 
 ## Maintaining the workshop itself
 

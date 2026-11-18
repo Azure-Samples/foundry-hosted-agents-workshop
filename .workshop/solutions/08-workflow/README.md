@@ -4,7 +4,7 @@
 
 # Solution 08 — TravelBuddy as a durable workflow
 
-Builds on Step 7: the same Flights / Hotels / Activities specialists are reused as **workflow nodes** instead of runtime group chat participants. A `gather_preferences` step fans the request out to all three specialists, a `consolidate` step aggregates their answers and **checkpoints** the draft, and a `finalize_itinerary` step produces the plan. The graph is exposed as one hosted agent via `workflow.as_agent()`, so hosting and deployment are unchanged (`resources: []`, no `azd provision`).
+Builds on Step 7: the same Flights / Hotels / Activities specialists are reused as **workflow nodes** instead of runtime group chat participants. A `gather_preferences` step fans the request out to all three specialists, a `consolidate` step aggregates their answers and **checkpoints** the draft, and a `finalize_itinerary` step produces the plan. The graph is exposed as one hosted agent via `workflow.as_agent()`, so hosting and deployment are unchanged (same `azure.yaml` service, no new Azure resources — just `azd deploy`).
 
 ## Layout
 
@@ -17,7 +17,8 @@ Builds on Step 7: the same Flights / Hotels / Activities specialists are reused 
 - `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` (from Step 5).
 - `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/` (from Step 6). Never deployed.
 - `travel_toolbox/` — the toolbox definition (`toolbox.yaml`).
-- `.env.example` — shared configuration, including `FOUNDRY_SKILL_NAMES`.
+- `azure.yaml` — the azd project file (copy it to your repo root); unchanged from Step 7.
+- `.env.example` — shared configuration, including `SKILL_NAMES`.
 
 ## Graph
 
@@ -31,7 +32,7 @@ gather_preferences ─┬─► flights ────┐
 
 ## Run it
 
-1. Copy `.env.example` to `.env` and fill in values (including `FOUNDRY_SKILL_NAMES`).
+1. Copy `.env.example` to `.env` and fill in values (including `SKILL_NAMES`).
 2. Sign in with Entra ID: `az login`. Uploading and downloading Foundry skills needs **Foundry User** (formerly Azure AI User) on the Foundry project, and the account must allow **public network access** (the Skills API does not support private networking).
 3. Install dependencies: `pip install -r travel_assistant/requirements.txt`.
 4. Provision the destinations index once (from Step 5): `python travel_indexer/provision_index.py`.

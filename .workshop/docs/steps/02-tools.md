@@ -11,10 +11,10 @@
 
 ## What's already in the repo
 
-- `travel_assistant/main.py`, `agent.yaml`, `agent.manifest.yaml` — carried over from Step 1 (your TravelBuddy chat agent). Nothing was deleted when you advanced; your Step 1 work is preserved.
+- `travel_assistant/main.py` and the repo-root `azure.yaml` — carried over from Step 1 (your TravelBuddy chat agent). Nothing was deleted when you advanced; your Step 1 work is preserved.
 - `travel_assistant/tools.py` — a **stub** laid down for this step with a single `TODO`. You'll implement the three tool functions here.
 
-In this step you **implement** `tools.py`, then make two small edits to `main.py` (one import + one argument) and one edit to the manifest's description. You do **not** rewrite `main.py` from scratch — you add to the file you finished in Step 1.
+In this step you **implement** `tools.py`, then make two small edits to `main.py` (one import + one argument) and one metadata edit in `azure.yaml`. You do **not** rewrite `main.py` from scratch — you add to the file you finished in Step 1.
 
 ## Concept (5-min read)
 
@@ -33,7 +33,7 @@ The framework hides all of that plumbing — the request/response threading, arg
 
 Each tool in this step is decorated with `@tool(approval_mode="never_require")`. The `@tool` decorator marks the function as a callable tool and lets you configure its behavior; `approval_mode="never_require"` tells the runtime to run it automatically without pausing for human approval — appropriate here because the tools are read-only and return mock data. (Later steps and the [tool-approval docs](https://learn.microsoft.com/agent-framework/agents/tools/tool-approval) cover tools that *should* require a confirmation step.)
 
-For the workshop these tools return **mock** data, but the registration pattern is the real lesson: later you can swap the mock bodies for real weather, time-zone, or exchange-rate APIs without changing how the agent registers them. Note also that local tools run **in-process** inside the same hosted-agent container — they add no new Azure resources, so your `agent.manifest.yaml` and deployment shape barely change from Step 1.
+For the workshop these tools return **mock** data, but the registration pattern is the real lesson: later you can swap the mock bodies for real weather, time-zone, or exchange-rate APIs without changing how the agent registers them. Note also that local tools run **in-process** inside the same hosted-agent container — they add no new Azure resources, so your `azure.yaml` and deployment shape barely change from Step 1.
 
 ```mermaid
 flowchart LR
@@ -193,111 +193,39 @@ Then update the `Agent(...)` call. **Keep your Step 1 instructions exactly as th
 
 That's the whole change: the `from tools import ...` line and the `tools=[...]` argument do the wiring; the appended instructions just tell the model when to reach for the tools. Everything else in `main.py` is unchanged from Step 1. If you get stuck, the finished file is in [`.workshop/solutions/02-tools/`](.workshop/solutions/02-tools/).
 
-### 3. Update the metadata in `travel_assistant/agent.manifest.yaml`
+### 3. Update the agent's metadata in `azure.yaml`
 
-Local Python tools run inside your hosted-agent process, so the manifest **structure doesn't change** — same `template`, same `protocols`, and `resources` stays empty (`[]`) because no new Azure resource is needed. The edits are **metadata only**: update the human-facing `description`, add a `Function Tools` tag, and declare the three tools under `metadata.tool_declarations` so anyone browsing the agent can see what it can do.
-
-Update the `description`:
+Local Python tools run inside your hosted-agent process, so the hosted-agent **shape doesn't change** — same container, same `protocols`, same `env`, and no new Azure resource. The edits to the `travel-buddy` service in the repo-root `azure.yaml` are **metadata only**: update the human-facing `description` and add a `Function Tools` tag:
 
 ```yaml
-# travel_assistant/agent.manifest.yaml
-description: >
-  TravelBuddy is an Agent Framework hosted agent with local Python function
-  tools for destination weather, local time, and currency conversion.
+# azure.yaml — under services: travel-buddy:
+    description: TravelBuddy with local Python function tools for destination weather, local time, and currency conversion.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+        - Function Tools     # <-- added
 ```
 
-Then extend `metadata` — add the new `Function Tools` tag and the `tool_declarations` block (`Travel Assistant` is already in the Step 1 tags):
-
-```yaml
-metadata:
-  tags:
-    - Agent Framework
-    - AI Agent Hosting
-    - Azure AI AgentServer
-    - Responses Protocol
-    - Travel Assistant
-    - Function Tools     # <-- added
-  tool_declarations:     # <-- added: describes the three tools for anyone browsing the agent
-    - name: get_weather
-      description: Returns mock destination weather for a city and optional date.
-      parameters:
-        city: string
-        date: "string | null"
-    - name: get_local_time
-      description: Returns the current local time for a destination city.
-      parameters:
-        city: string
-    - name: convert_currency
-      description: Converts mock travel prices between USD, EUR, JPY, and GBP.
-      parameters:
-        amount: float
-        from_currency: string
-        to_currency: string
-```
-
-`tool_declarations` is **descriptive metadata** — it documents the tools for humans and tooling that browse the manifest; the tools themselves are still registered in code via `tools=[...]` in `main.py`. Leave the `template` block, the `environment_variables`, and `resources: []` exactly as they were in Step 1. No new Azure resources are declared, so you won't need to re-provision — but because `azd ai agent init` **copied** your code and manifest into the project folder in Step 1, you will re-run `azd ai agent init` in the next section to refresh that copy with these changes before deploying.
+The tools themselves are registered in code via `tools=[...]` in `main.py` — `azure.yaml` describes how the agent is hosted, not what it can do. Leave the rest of the file (`name`, `env`, `container`, …) exactly as it was in Step 1.
 
 ## Run and deploy TravelBuddy
 
-**Do you need to re-init? Yes.** In Step 1, `azd ai agent init` **copied** your `travel_assistant/` code into the generated `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder — that copy is the snapshot azd actually builds and deploys. Your Step 2 edits live in `travel_assistant/` (the new `tools.py` and the `main.py` changes), so the copied snapshot is now **stale**. Re-run `azd ai agent init` to refresh it before you run or deploy; it re-copies the current `travel_assistant/` code and re-reads the updated `agent.manifest.yaml`.
+**No new setup needed.** `azd` packages `travel_assistant/` straight from your working tree on every `azd ai agent run` and `azd deploy`, so your new `tools.py` and `main.py` changes are picked up automatically. You do **not** need `azd provision` again — you added no Azure resources and no new environment variables, so the azd environment and infrastructure from Step 1 are unchanged. Run every command from the **repo root**.
 
-You do **not** need `azd provision` again — you added no new Azure resources (`resources:` is still `[]`), so the infrastructure from Step 1 is unchanged. The re-init just refreshes the copied code + manifest, and then `azd deploy` ships the new container version.
-
-> Prefer not to re-init? You can instead copy your edited files (`travel_assistant/tools.py` and `travel_assistant/main.py`) into the code directory inside `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` and skip straight to `azd deploy`. Re-init is the reliable path because it also picks up the manifest changes and can't drift out of sync.
-
-1. **Re-init from the repository root.** Load your `.env` into the shell first — the repo `.env` isn't auto-loaded, and the shell needs `WORKSHOP_RESOURCE_PREFIX` to expand `--agent-name` (and to `cd` into the folder later):
-
-   <!-- terminal -->
-   ```bash
-   # bash / zsh
-   set -a; source .env; set +a
-   azd ai agent init -m travel_assistant/agent.manifest.yaml \
-     --agent-name "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   ```
-
-   <!-- terminal -->
-   ```powershell
-   # PowerShell
-   Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
-     $name, $value = $_ -split '=', 2
-     Set-Item "Env:$($name.Trim())" $value.Trim()
-   }
-   azd ai agent init -m travel_assistant/agent.manifest.yaml `
-     --agent-name "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   ```
-
-   This refreshes the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` folder with your updated `main.py`, the new `tools.py`, and the updated manifest metadata.
-
-2. **`cd` into the project folder and confirm the azd env values.** If the re-init reset the azd environment, re-set the three variables (they're idempotent, so it's safe to run them again). Keep `.env` loaded in the shell so you can pass the values through:
-
-   <!-- terminal -->
-   ```bash
-   # bash / zsh — after: set -a; source .env; set +a
-   cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   azd env set AZURE_AI_PROJECT_ENDPOINT "$AZURE_AI_PROJECT_ENDPOINT"
-   azd env set AZURE_AI_MODEL_DEPLOYMENT_NAME "$AZURE_AI_MODEL_DEPLOYMENT_NAME"
-   azd env set WORKSHOP_RESOURCE_PREFIX "$WORKSHOP_RESOURCE_PREFIX"
-   ```
-
-   <!-- terminal -->
-   ```powershell
-   # PowerShell — after loading .env into the shell
-   cd "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   azd env set AZURE_AI_PROJECT_ENDPOINT "$env:AZURE_AI_PROJECT_ENDPOINT"
-   azd env set AZURE_AI_MODEL_DEPLOYMENT_NAME "$env:AZURE_AI_MODEL_DEPLOYMENT_NAME"
-   azd env set WORKSHOP_RESOURCE_PREFIX "$env:WORKSHOP_RESOURCE_PREFIX"
-   ```
-
-3. **Run TravelBuddy locally** in the hosted Responses runtime:
+1. **Run TravelBuddy locally** in the hosted Responses runtime:
 
    <!-- terminal -->
    ```bash
    azd ai agent run
    ```
 
-   `azd` reads `agent.yaml`, substitutes values from your azd environment, and starts the server on `http://localhost:8088` — now with your three tools loaded. Leave this terminal running.
+   `azd` reads the `travel-buddy` service in `azure.yaml`, resolves its `env` from your azd environment, and starts the server on `http://localhost:8088` — now with your three tools loaded. Leave this terminal running.
 
-4. **Invoke the local agent from a second terminal.** The `azd ai agent run` process is still holding the first terminal, so open a **new** one (in the same project folder) and send a prompt that needs live information, so the model has a reason to call a tool:
+2. **Invoke the local agent from a second terminal.** The `azd ai agent run` process is still holding the first terminal, so open a **new** one (also at the repo root) and send a prompt that needs live information, so the model has a reason to call a tool:
 
    <!-- terminal -->
    ```bash
@@ -308,16 +236,16 @@ You do **not** need `azd provision` again — you added no new Azure resources (
 
    Prefer a UI? With the local agent still running, open the **Agent Inspector** from the Foundry Toolkit (Command Palette → **Foundry Toolkit: Open Agent Inspector**). It connects to `http://localhost:8088` and shows each streamed tool call and result.
 
-5. **Deploy to Foundry**:
+3. **Deploy to Foundry**:
 
    <!-- terminal -->
    ```bash
    azd deploy
    ```
 
-   This builds the container image from the **refreshed** project-folder snapshot — now including `tools.py` and your updated `main.py` — pushes it to your Azure Container Registry, and rolls out a new hosted agent version. No `azd provision` is needed because the infrastructure is unchanged.
+   This builds the container image from `travel_assistant/` — now including `tools.py` and your updated `main.py` — stores it to your Azure Container Registry, and rolls out a new hosted agent version. No `azd provision` is needed because the infrastructure is unchanged.
 
-6. **Invoke the deployed agent**:
+4. **Invoke the deployed agent**:
 
    <!-- terminal -->
    ```bash
@@ -339,14 +267,14 @@ For the comparison prompt, the model may call `get_weather` once per city.
 - **Tools never get called**: the model decides whether to call them. Make sure your docstring is descriptive (the model reads it). Try a prompt that explicitly needs real-time info.
 - **`Function signature mismatch`**: the Agent Framework needs JSON-serialisable types. Use `str`, `int`, `float`, `bool`, `dict`, `list` — not custom classes.
 - **`Schema generation failed`**: missing type hint on a parameter. Add `: type` for every arg.
-- **`ModuleNotFoundError: tools`**: run from the repository root with `python travel_assistant/main.py`, or use `azd ai agent run` from the project folder.
+- **`ModuleNotFoundError: tools`**: run from the repository root with `python travel_assistant/main.py`, or use `azd ai agent run` from the repo root.
 - **Unknown city time zones**: add the city to `CITY_TIME_ZONES`, or let the mock fall back to UTC.
 - **Currency values look approximate**: they are static mock rates. Replace `MOCK_RATES_TO_USD` with a real exchange-rate API for production.
-- **Deploy didn't pick up my tools**: `azd ai agent init` **copied** your code into the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder, so edits in `travel_assistant/` don't deploy on their own. Re-run `azd ai agent init` (step 1 above) to refresh that snapshot — or copy `tools.py`/`main.py` into the folder's code directory — then `azd deploy` again.
+- **Deploy didn't pick up my tools**: make sure you ran `azd deploy` from the repo root (where `azure.yaml` lives) after saving `tools.py` and `main.py`, and that neither file is listed in `travel_assistant/.azdignore`.
 
 ## Optional: Observe TravelBuddy's tool calls with Application Insights
 
-You just gave TravelBuddy three tools — wouldn't it be nice to *watch* each one fire: which tool the model chose, with what arguments, how long it took, and how many tokens the run cost? Foundry hosted agents have **built-in observability**. The Agent Framework is instrumented out of the box, and the Foundry hosting runtime exports those traces to **Application Insights** for you. There's **no code to write, no package to add, and no manifest change** — your `resources: []` stays exactly as it is. You connect an Application Insights resource **with managed-identity authentication** — the connection string stops being a credential — grant a few least-privilege roles, and the traces appear.
+You just gave TravelBuddy three tools — wouldn't it be nice to *watch* each one fire: which tool the model chose, with what arguments, how long it took, and how many tokens the run cost? Foundry hosted agents have **built-in observability**. The Agent Framework is instrumented out of the box, and the Foundry hosting runtime exports those traces to **Application Insights** for you. There's **no code to write, no package to add, and no `azure.yaml` change**. You connect an Application Insights resource **with managed-identity authentication** — the connection string stops being a credential — grant a few least-privilege roles, and the traces appear.
 
 Each invocation becomes a span tree you can drill into:
 
@@ -379,7 +307,7 @@ Foundry turns on **server-side tracing** the moment you connect an Application I
 
 > **Already connected with a connection string?** Convert it in place: project name menu → **Project details** → **Connected resources** → select the Application Insights connection → **Edit authentication** → **Project managed identity** → **Save**.
 
-> **Name it, then clean it up yourself.** If you create a new resource, prefix its name with your `WORKSHOP_RESOURCE_PREFIX` (for example `${WORKSHOP_RESOURCE_PREFIX}-appinsights`) so it's easy to spot later. Application Insights is created *out-of-band* — it isn't in the manifest, so **neither `azd down` nor `.workshop/scripts/cleanup.py` removes it**. Delete it (and any Log Analytics workspace the wizard created alongside it) when you're done, for example `az resource delete --ids <app-insights-resource-id>`.
+> **Name it, then clean it up yourself.** If you create a new resource, prefix its name with your `WORKSHOP_RESOURCE_PREFIX` (for example `${WORKSHOP_RESOURCE_PREFIX}-appinsights`) so it's easy to spot later. Application Insights is created *out-of-band* — it isn't declared in `azure.yaml`, so **neither `azd down` nor `.workshop/scripts/cleanup.py` removes it**. Delete it (and any Log Analytics workspace the wizard created alongside it) when you're done, for example `az resource delete --ids <app-insights-resource-id>`.
 
 Note the resource ID — every command below reuses it. **Re-run this in each new terminal**, because an unset scope is the one mistake that really bites: `az role assignment create --scope ""` doesn't fail, it silently falls back to **subscription scope** and grants far more than you intended. Each block below guards against that.
 
@@ -572,7 +500,7 @@ foreach ($SCOPE in @($APP_INSIGHTS, $WORKSPACE)) {
 
 ### 5. Generate traffic, then read the traces
 
-> **Heads up — traces capture prompt and tool content by default.** When deployed, the hosting runtime defaults `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `true`, so the spans you're about to generate include prompts, tool arguments, and model responses. That's great for debugging — and it's what content-based **evaluations** (step 4) read — but treat traces as **sensitive production data** and apply the same access controls you'd give logs. To record only structure (span names, durations, token counts, status) and redact content, set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `"false"` under `template.environment_variables` in `travel_assistant/agent.manifest.yaml` (and `agent.yaml`'s `environment_variables` for local runs), then **re-run `azd ai agent init` to refresh the deployed snapshot** (see the deploy section above) and `azd deploy`. Redacting content disables content-based quality evaluators, so keep it on only while you need evaluations. Either way, never put secrets in prompts or tool arguments.
+> **Heads up — traces capture prompt and tool content by default.** When deployed, the hosting runtime defaults `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `true`, so the spans you're about to generate include prompts, tool arguments, and model responses. That's great for debugging — and it's what content-based **evaluations** (step 4) read — but treat traces as **sensitive production data** and apply the same access controls you'd give logs. To record only structure (span names, durations, token counts, status) and redact content, add `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "false"` to the `env` map of the `travel-buddy` service in `azure.yaml`, then `azd deploy` from the repo root. Redacting content disables content-based quality evaluators, so keep it on only while you need evaluations. Either way, never put secrets in prompts or tool arguments.
 
 1. Make sure TravelBuddy is deployed — see **item 5 of [Run and deploy TravelBuddy](#run-and-deploy-travelbuddy)** earlier in this step. Already deployed before you connected Application Insights? No redeploy needed — tracing is enabled at the project level.
 2. Invoke it a few times to produce spans — reuse the [Try it](#try-it) prompts:

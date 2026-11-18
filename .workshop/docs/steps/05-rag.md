@@ -7,32 +7,32 @@
 - What **RAG** is, and why grounding beats relying on the model's training data for facts you own
 - The difference between a **context provider** (runs *before* the model, injects grounding) and a **tool** (the model *chooses* to call it)
 - How `AzureAISearchContextProvider` retrieves the top matching records and adds them to context on every turn
-- Why the search index is built **out-of-band** (once, by a script) so your deployment shape doesn't change — still `resources: []`, no `azd provision`
+- Why the search index is built **out-of-band** (once, by a script) so your deployment shape doesn't change — no new azd-managed resources, no `azd provision`
 - How to keep the Step 4 tools + toolbox working while layering retrieval on top
 
 ## What's already in the repo
 
-- `travel_assistant/main.py`, `travel_assistant/tools.py`, `agent.yaml`, `agent.manifest.yaml`, `requirements.txt` — carried over from Step 4 (TravelBuddy with the three function tools **and** the Foundry Toolbox). Nothing was deleted when you advanced.
+- `travel_assistant/main.py`, `travel_assistant/tools.py`, `travel_assistant/requirements.txt`, and the repo-root `azure.yaml` — carried over from Step 4 (TravelBuddy with the three function tools **and** the Foundry Toolbox). Nothing was deleted when you advanced.
 - `travel_assistant/data/itinerary.csv` — the Step 4 sample itinerary for Code Interpreter.
-- `travel_indexer/` — a **new sibling folder** (delivered when you advanced) that holds everything the index needs, *outside* the agent snapshot:
+- `travel_indexer/` — a **new sibling folder** (delivered when you advanced) that holds everything the index needs, *outside* the agent's packaged folder:
   - `travel_indexer/data/destinations.json` — a small seed of curated destination records (city, country, summary, highlights). This is the corpus you'll index.
   - `travel_indexer/provision_index.py` — a complete, one-shot script that creates the Search index and uploads the destinations. You run it once, out-of-band. It needs no separate dependencies: `azure-search-documents`, `azure-identity`, and `python-dotenv` are already in the environment you built from `travel_assistant/requirements.txt`.
 - `travel_toolbox/toolbox.yaml` — the toolbox definition from Step 4, still a sibling of `travel_assistant/`. Unchanged this step.
 
-**Why the indexer lives in `travel_indexer/`, not in `travel_assistant/`.** `azd ai agent init` snapshots **only** `travel_assistant/` when it packages the deployed agent. The index is built once, offline — the provisioning script and its source JSON are *tooling*, not part of the running agent — so they live in a sibling folder that is never bundled into the agent container. This is the same reason `travel_toolbox/` sits outside the snapshot. At runtime the agent reaches the finished index over the network; it never needs `provision_index.py` or `destinations.json` on disk.
+**Why the indexer lives in `travel_indexer/`, not in `travel_assistant/`.** `azd` packages **only** `travel_assistant/` (the `project:` of the `travel-buddy` service in `azure.yaml`) into the deployed agent's container image. The index is built once, offline — the provisioning script and its source JSON are *tooling*, not part of the running agent — so they live in a sibling folder that is never bundled into the agent container. This is the same reason `travel_toolbox/` sits outside `travel_assistant/`. At runtime the agent reaches the finished index over the network; it never needs `provision_index.py` or `destinations.json` on disk.
 
-In this step you make **delta-only** edits: provision the index once, set **two** new environment variables (`AZURE_AI_SEARCH_ENDPOINT`, `AZURE_AI_SEARCH_INDEX_NAME`), add an `AzureAISearchContextProvider` to `main.py`'s `context_providers`, append two grounding sentences to the instructions, and update `agent.yaml` + the manifest metadata. You keep your function tools and toolbox — you only add what RAG needs.
+In this step you make **delta-only** edits: provision the index once, set **two** new environment variables (`AZURE_AI_SEARCH_ENDPOINT`, `AZURE_AI_SEARCH_INDEX_NAME`), add an `AzureAISearchContextProvider` to `main.py`'s `context_providers`, append two grounding sentences to the instructions, and update `azure.yaml` (metadata plus two `env` entries). You keep your function tools and toolbox — you only add what RAG needs.
 
 ## Prerequisites
 
-RAG needs an **Azure AI Search** resource. This is a **participant-provided** Azure resource — it is *not* declared in the manifest and *not* created by `azd provision`. Before you start:
+RAG needs an **Azure AI Search** resource. This is a **participant-provided** Azure resource — it is *not* declared in `azure.yaml` and *not* created by `azd provision`. Before you start:
 
 - An Azure AI Search service (Basic tier or higher). Copy its endpoint (e.g. `https://<name>.search.windows.net`).
 - Role assignments on that service so `DefaultAzureCredential` works without keys. `provision_index.py` both **creates the index definition** and **uploads documents**, which are two different permissions:
   - **`Search Service Contributor`** — create/delete the index definition.
   - **`Search Index Data Contributor`** — upload the destination documents (and query them locally).
 
-  These two roles are for **you** (your `az login` user) — they let you provision the index and run TravelBuddy locally. The **deployed** agent queries Search under a *different* identity that only exists after you deploy, so you grant it read access (`Search Index Data Reader`, least privilege) in [step 6](#run-and-deploy-travelbuddy), not here.
+  These two roles are for **you** (your `az login` user) — they let you provision the index and run TravelBuddy locally. The **deployed** agent queries Search under a *different* identity that only exists after you deploy, so you grant it read access (`Search Index Data Reader`, least privilege) in [step 5](#run-and-deploy-travelbuddy), not here.
 
 <!-- terminal -->
 ```bash
@@ -241,84 +241,51 @@ agent = Agent(
 
 `context_providers` is the only structural change; the two extra instruction sentences are a prompt tweak. `AzureAISearchContextProvider` runs the search, formats the top 3 records, and prepends them to context every turn — no tool call required. RAG is a required capability here: reading `AZURE_AI_SEARCH_ENDPOINT` and `AZURE_AI_SEARCH_INDEX_NAME` with `os.environ["..."]` (like the project endpoint and model in earlier steps) fails fast with a clear `KeyError` if either is missing, so you never run against a half-configured index.
 
-### 4. Update `agent.yaml`
+### 4. Update the agent's metadata and `env` in `azure.yaml`
 
-Add **only** the two new variables. Leave `TOOLBOX_ENDPOINT` and everything from earlier steps in place:
-
-```yaml
-# travel_assistant/agent.yaml (delta — add to environment_variables)
-  - name: AZURE_AI_SEARCH_ENDPOINT
-    value: ${AZURE_AI_SEARCH_ENDPOINT}
-  - name: AZURE_AI_SEARCH_INDEX_NAME
-    value: ${AZURE_AI_SEARCH_INDEX_NAME}
-```
-
-### 5. Update the manifest
-
-The manifest changes add no Azure resource — `resources` stays `[]`, so there is nothing for azd to provision. What you're editing is the agent's descriptive metadata plus two runtime environment variables.
-
-Update the `description` to mention RAG:
+These edits add no Azure resource — the Search index was created out-of-band by `provision_index.py`, so there is nothing for azd to provision. What you're editing on the `travel-buddy` service in the repo-root `azure.yaml` is the agent's descriptive metadata (a RAG-aware `description` and a `RAG` tag) plus **only** the two new runtime environment variables. Leave `TOOLBOX_ENDPOINT` and everything from earlier steps in place:
 
 ```yaml
-# travel_assistant/agent.manifest.yaml
-description: >
-  ... existing Step 4 description ..., and RAG grounding over a curated
-  destinations index in Azure AI Search.
+# azure.yaml — under services: travel-buddy:
+    description: TravelBuddy with function tools, a Foundry Toolbox, and RAG grounding over a destinations index in Azure AI Search.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+        - Function Tools
+        - MCP Tools
+        - Toolbox Tools
+        - RAG                    # <-- added
+    # ... protocols unchanged ...
+    env:
+      PYTHONNOUSERSITE: "1"
+      AZURE_AI_PROJECT_ENDPOINT: ${FOUNDRY_PROJECT_ENDPOINT}
+      AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+      WORKSHOP_RESOURCE_PREFIX: ${WORKSHOP_RESOURCE_PREFIX}
+      TOOLBOX_ENDPOINT: ${TOOLBOX_ENDPOINT}
+      AZURE_AI_SEARCH_ENDPOINT: ${AZURE_AI_SEARCH_ENDPOINT}       # <-- added
+      AZURE_AI_SEARCH_INDEX_NAME: ${AZURE_AI_SEARCH_INDEX_NAME}   # <-- added
 ```
 
-Add the `RAG` tag (keep the rest) and declare the retrieval surface under `tool_declarations` (keep the Step 4 entries):
-
-```yaml
-metadata:
-  tags:
-    - Agent Framework
-    - AI Agent Hosting
-    - Azure AI AgentServer
-    - Responses Protocol
-    - Travel Assistant
-    - Function Tools
-    - MCP Tools
-    - Toolbox Tools
-    - RAG                    # <-- added
-  tool_declarations:
-    # ... keep the get_weather / get_local_time / convert_currency / travel-toolbox entries ...
-    - name: travelbuddy_destinations     # <-- added: the retrieval surface
-      description: >
-        Azure AI Search retrieval over the curated destinations index; injects the
-        top-k matching destination records into context before each turn.
-      type: azure_ai_search
-      endpoint: ${AZURE_AI_SEARCH_ENDPOINT}
-```
-
-Then mirror the two new variables into the **existing** `template.environment_variables` list (keep the earlier entries):
-
-```yaml
-template:
-  # ... name, kind, protocols unchanged ...
-  environment_variables:
-    # ... AZURE_AI_PROJECT_ENDPOINT, AZURE_AI_MODEL_DEPLOYMENT_NAME, WORKSHOP_RESOURCE_PREFIX, TOOLBOX_ENDPOINT ...
-    - name: AZURE_AI_SEARCH_ENDPOINT     # <-- added
-      value: ${AZURE_AI_SEARCH_ENDPOINT}
-    - name: AZURE_AI_SEARCH_INDEX_NAME   # <-- added
-      value: ${AZURE_AI_SEARCH_INDEX_NAME}
-
-resources: []                            # <-- unchanged: the index is created out-of-band
-```
+The context provider is wired in code via `context_providers=[...]` in `main.py` — `azure.yaml` describes how the agent is hosted, not what it can do. Leave the rest of the file (`name`, `container`, …) exactly as it was in Step 4.
 
 ## Run and deploy TravelBuddy
 
-**Do you need to re-init? Yes.** In earlier steps, `azd ai agent init` **copied** your `travel_assistant/` code into the generated `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder — that copy is the snapshot azd actually builds and deploys. Your Step 5 edits (the `main.py` context-provider addition and the manifest/`agent.yaml` changes) live in `travel_assistant/`, so the copied snapshot is now **stale**. Re-run `azd ai agent init` to refresh it before you run or deploy.
+**Your code changes need no extra setup.** `azd` packages `travel_assistant/` straight from your working tree on every `azd ai agent run` and `azd deploy`, so your `main.py` context-provider addition is picked up automatically. (`travel_indexer/` is never packaged — it's out-of-band tooling.)
 
-**Do you need `azd provision`? No.** You added no new Azure resource to the manifest (`resources:` is still `[]`) — the Azure AI Search index was created out-of-band by `provision_index.py`. The infrastructure from earlier steps is unchanged.
+**Do you need `azd provision`? No.** You added no new azd-managed Azure resource — the Azure AI Search index was created out-of-band by `provision_index.py`, and `azure.yaml` gained only `env` entries. The infrastructure from earlier steps is unchanged. Run every command from the **repo root**.
 
-1. **Re-init from the repository root.** Load your `.env` into the shell first — the repo `.env` isn't auto-loaded, and the shell needs `WORKSHOP_RESOURCE_PREFIX` to expand `--agent-name` (and to `cd` into the folder later):
+1. **Add the new values to the azd env.** azd keeps its **own** environment store (`.azure/<env-name>/.env`), separate from the repo `.env`. The Foundry values are already in the azd env from earlier steps, so you only need to set the **two new** Search variables. Load your `.env` into the shell first (the repo `.env` isn't auto-loaded), then pass the values through:
 
    <!-- terminal -->
    ```bash
    # bash / zsh
    set -a; source .env; set +a
-   azd ai agent init -m travel_assistant/agent.manifest.yaml \
-     --agent-name "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+   azd env set AZURE_AI_SEARCH_ENDPOINT "$AZURE_AI_SEARCH_ENDPOINT"
+   azd env set AZURE_AI_SEARCH_INDEX_NAME "$AZURE_AI_SEARCH_INDEX_NAME"
    ```
 
    <!-- terminal -->
@@ -328,40 +295,20 @@ resources: []                            # <-- unchanged: the index is created o
      $name, $value = $_ -split '=', 2
      Set-Item "Env:$($name.Trim())" $value.Trim()
    }
-   azd ai agent init -m travel_assistant/agent.manifest.yaml `
-     --agent-name "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   ```
-
-   This refreshes the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` folder with your updated `main.py` and manifest metadata (including the new `AZURE_AI_SEARCH_ENDPOINT` and `AZURE_AI_SEARCH_INDEX_NAME` variables).
-
-2. **`cd` into the project folder and add the new values to the azd env.** azd keeps its **own** environment store (`.azure/<env-name>/.env`), separate from the repo `.env`. The Foundry values are already in the azd env from earlier steps, so you only need to set the **two new** Search variables. Keep `.env` loaded in the shell so you can pass the values through:
-
-   <!-- terminal -->
-   ```bash
-   # bash / zsh — after: set -a; source .env; set +a
-   cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   azd env set AZURE_AI_SEARCH_ENDPOINT "$AZURE_AI_SEARCH_ENDPOINT"
-   azd env set AZURE_AI_SEARCH_INDEX_NAME "$AZURE_AI_SEARCH_INDEX_NAME"
-   ```
-
-   <!-- terminal -->
-   ```powershell
-   # PowerShell — after loading .env into the shell
-   cd "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
    azd env set AZURE_AI_SEARCH_ENDPOINT "$env:AZURE_AI_SEARCH_ENDPOINT"
    azd env set AZURE_AI_SEARCH_INDEX_NAME "$env:AZURE_AI_SEARCH_INDEX_NAME"
    ```
 
-3. **Run TravelBuddy locally** in the hosted Responses runtime:
+2. **Run TravelBuddy locally** in the hosted Responses runtime:
 
    <!-- terminal -->
    ```bash
    azd ai agent run
    ```
 
-   `azd` reads `agent.yaml`, substitutes values from your azd environment, and starts the server on `http://localhost:8088` — now with your Step 4 function tools and toolbox **and** the Azure AI Search context provider grounding every turn. Leave this terminal running.
+   `azd` reads the `travel-buddy` service in `azure.yaml`, resolves its `env` from your azd environment, and starts the server on `http://localhost:8088` — now with your Step 4 function tools and toolbox **and** the Azure AI Search context provider grounding every turn. Leave this terminal running.
 
-4. **Invoke the local agent from a second terminal.** Open a **new** terminal (in the same project folder) and ask a question that hits the destinations index:
+3. **Invoke the local agent from a second terminal.** Open a **new** terminal (also at the repo root) and ask a question that hits the destinations index:
 
    <!-- terminal -->
    ```bash
@@ -372,16 +319,16 @@ resources: []                            # <-- unchanged: the index is created o
 
    Prefer a UI? With the local agent still running, open the **Agent Inspector** from the Foundry Toolkit (Command Palette → **Foundry Toolkit: Open Agent Inspector**). It connects to `http://localhost:8088` and shows the retrieved context injected before each response.
 
-5. **Deploy to Foundry**:
+4. **Deploy to Foundry**:
 
    <!-- terminal -->
    ```bash
    azd deploy
    ```
 
-   This builds the container image from the **refreshed** project-folder snapshot — now including the RAG context provider and Search env vars — pushes it to your Azure Container Registry, and rolls out a new hosted agent version. No `azd provision` is needed because the infrastructure is unchanged.
+   This builds the container image from `travel_assistant/` — now including the RAG context provider — stores it to your Azure Container Registry, and rolls out a new hosted agent version that receives the two Search env vars from `azure.yaml`. No `azd provision` is needed because the infrastructure is unchanged.
 
-6. **Grant the deployed agent's instance identity read access to the index.** Locally the agent queried Search as *you*. Deployed, its `AzureAISearchContextProvider` calls Search with `DefaultAzureCredential`, which resolves the container's runtime identity — the agent's **instance identity** (a per-agent Microsoft Entra service principal). That principal has no Search role by default, so grant it the least-privilege **`Search Index Data Reader`** — and nothing broader.
+5. **Grant the deployed agent's instance identity read access to the index.** Locally the agent queried Search as *you*. Deployed, its `AzureAISearchContextProvider` calls Search with `DefaultAzureCredential`, which resolves the container's runtime identity — the agent's **instance identity** (a per-agent Microsoft Entra service principal). That principal has no Search role by default, so grant it the least-privilege **`Search Index Data Reader`** — and nothing broader.
 
    First retrieve the instance identity's principal ID from the **agent** (not a version), then assign the role. `$SCOPE` is the **same Search-service scope from [Prerequisites](#prerequisites)**.
 
@@ -431,7 +378,7 @@ resources: []                            # <-- unchanged: the index is created o
    >
    > **Why the agent identity and not the project managed identity?** The project MI handles *platform* operations (model-inference proxy, ACR image pull, Log Analytics telemetry); your in-container code reaching a downstream resource like Azure AI Search authenticates as the **agent instance identity** — Microsoft's permissions reference notes data-plane roles for Storage/Search/Key Vault go to *"the calling identity or the agent identity"* ([hosted agent permissions](https://learn.microsoft.com/azure/foundry/agents/concepts/hosted-agent-permissions)). Granting per-agent also gives you real least-privilege isolation. (The exception is **Foundry Agent Service's managed Foundry IQ integration**, where Foundry — not your code — performs the retrieval and uses the project MI; calling Search from your own code always uses the agent identity, whatever the provider mode. See *Where this goes next*.)
 
-7. **Invoke the deployed agent**:
+6. **Invoke the deployed agent**:
 
    <!-- terminal -->
    ```bash
@@ -538,7 +485,7 @@ If the roles are assigned and propagated but you *still* get `403`, the Search s
 
 ### `Operation returned an invalid status 'Forbidden'` when the **deployed** agent queries the index
 
-This is the most common Step 5 surprise: everything works locally, then the Playground (or `azd ai agent invoke`) returns `Forbidden`. The cause is **identity**, not code. Locally the agent queries Search as *your* `az login` user (who has the roles from Prerequisites). Deployed, the `AzureAISearchContextProvider` calls Search with `DefaultAzureCredential`, which resolves the agent's **instance identity** — a per-agent service principal that has no Search role by default. Grant that identity **`Search Index Data Reader`** on the Search service — see **step 6 of "Run and deploy TravelBuddy"** above (resolve `instance_identity.principal_id`, then `az role assignment create`). Wait a minute or two for RBAC to propagate, then retry. (In the session logs you'll see a managed-identity token request to `.../msi/token` right before the `Forbidden` — that's the runtime identity that needs the role.) This grant is one-time per agent and survives redeploys. If the grant is in place and propagated but `Forbidden` persists, check that the Search service has **RBAC enabled** (**API Access control** must be "Role-based access control" or "Both", not "API keys" only) — see the local `403` entry above.
+This is the most common Step 5 surprise: everything works locally, then the Playground (or `azd ai agent invoke`) returns `Forbidden`. The cause is **identity**, not code. Locally the agent queries Search as *your* `az login` user (who has the roles from Prerequisites). Deployed, the `AzureAISearchContextProvider` calls Search with `DefaultAzureCredential`, which resolves the agent's **instance identity** — a per-agent service principal that has no Search role by default. Grant that identity **`Search Index Data Reader`** on the Search service — see **step 5 of "Run and deploy TravelBuddy"** above (resolve `instance_identity.principal_id`, then `az role assignment create`). Wait a minute or two for RBAC to propagate, then retry. (In the session logs you'll see a managed-identity token request to `.../msi/token` right before the `Forbidden` — that's the runtime identity that needs the role.) This grant is one-time per agent and survives redeploys. If the grant is in place and propagated but `Forbidden` persists, check that the Search service has **RBAC enabled** (**API Access control** must be "Role-based access control" or "Both", not "API keys" only) — see the local `403` entry above.
 
 ### `Set AZURE_AI_SEARCH_ENDPOINT in .env before provisioning`
 
@@ -562,7 +509,7 @@ That's the **runtime** RAG dependency. Re-run `pip install -r travel_assistant/r
 
 ### Deploy didn't pick up my change
 
-`azd ai agent init` **copied** your code into `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`, so edits in `travel_assistant/` don't deploy on their own. Re-run `azd ai agent init` to refresh the snapshot, then `azd deploy` again. (Edits in `travel_indexer/` are out-of-band and never deploy — re-run `provision_index.py` instead.)
+Make sure you ran `azd env set` for `AZURE_AI_SEARCH_ENDPOINT` and `AZURE_AI_SEARCH_INDEX_NAME` (step 1 above), that both have an entry in the `env` map of the `travel-buddy` service in `azure.yaml`, and then run `azd deploy` again from the repo root (where `azure.yaml` lives). (Edits in `travel_indexer/` are out-of-band and never deploy — re-run `provision_index.py` instead.)
 
 ## Where this goes next: Foundry IQ & agentic retrieval
 
@@ -650,7 +597,7 @@ Everything else — the `Agent(...)` call, `context_providers=context_providers`
 
 > **Deploying this is more than a code edit.** Three things bite beyond local runs:
 >
-> - **Variables.** Mirror into `agent.yaml` and the manifest only what your chosen form reads — `AZURE_OPENAI_RESOURCE_URL` for Form A, `AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME` for Form B — exactly as you did for the Search endpoint in Steps 4–5.
+> - **Variables.** Add to the `env` map in `azure.yaml` (and `azd env set`) only what your chosen form reads — `AZURE_OPENAI_RESOURCE_URL` for Form A, `AZURE_AI_SEARCH_KNOWLEDGE_BASE_NAME` for Form B — exactly as you did for the Search endpoint in this step.
 > - **Roles.** Form A *creates* a knowledge base on the first agentic retrieval, so the agent's instance identity needs create rights on the Search service (`Search Service Contributor`), not just the `Search Index Data Reader` this step granted. Prefer **Form B** when deploying: create the knowledge base out-of-band and leave the running agent with read-only access.
 > - **SDK build.** `low`/`medium` effort needs the preview Search SDK *inside the container*. `travel_assistant/requirements.txt` already lists `azure-search-documents` unpinned, and pip won't pick a prerelease on its own — replace that line with an explicit prerelease constraint (for example `azure-search-documents>=12.1.0b1`). A local `pip install --pre` does not change what the image builds with.
 
@@ -758,7 +705,7 @@ tools = [
 ]
 ```
 
-In the manifest it's declared like any other MCP surface (`type: mcp`), exactly as `octotrip-flights` was in Step 3, and the two variables are mirrored into `template.environment_variables` the same way you did for the Search endpoint.
+The two variables go into the `env` map in `azure.yaml` (and `azd env set`) exactly as `MCP_SERVER_LABEL` / `MCP_SERVER_URL` did in Step 3.
 
 Keep it keyless, on **both** sides of the server. Outbound, it authenticates to Search with its **own** managed identity holding `Search Index Data Reader` — it never accepts Search credentials from the caller and never embeds a key. Inbound, it must still authenticate its callers: an MCP endpoint that queries a privileged index must require an Entra ID token and authorize it, or you have published anonymous read access to your data. A server that authenticates nobody but holds a data-plane role is a confused deputy, not a Zero Trust design.
 

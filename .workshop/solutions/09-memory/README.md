@@ -4,7 +4,7 @@
 
 # Solution 09 — TravelBuddy with durable per-user memory
 
-Builds on Step 8: the same durable workflow (gather → specialists → consolidate → finalize) is unchanged, but each specialist now carries a `FoundryMemoryProvider`. The provider extracts stable traveler preferences (home airport, cabin class, budget band, dietary needs, favourite destinations) into a **Foundry Memory Store** and recalls them on later conversations. Because memory attaches as a `context_provider`, hosting and deployment are unchanged (`resources: []`, no `azd provision`).
+Builds on Step 8: the same durable workflow (gather → specialists → consolidate → finalize) is unchanged, but each specialist now carries a `FoundryMemoryProvider`. The provider extracts stable traveler preferences (home airport, cabin class, budget band, dietary needs, favourite destinations) into a **Foundry Memory Store** and recalls them on later conversations. Because memory attaches as a `context_provider`, hosting and deployment are unchanged (the same `azure.yaml` service plus two new `env` entries — just `azd deploy`).
 
 ## Layout
 
@@ -17,7 +17,8 @@ Builds on Step 8: the same durable workflow (gather → specialists → consolid
 - `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` (from Step 5).
 - `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/` (from Step 6). Never deployed.
 - `travel_toolbox/` — the toolbox definition (`toolbox.yaml`).
-- `.env.example` — shared configuration (adds `FOUNDRY_SKILL_NAMES`, `AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME`, and `MEMORY_STORE_NAME`).
+- `azure.yaml` — the azd project file (copy it to your repo root); its `env` map adds `AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME` and `MEMORY_STORE_NAME`.
+- `.env.example` — shared configuration (adds `SKILL_NAMES`, `AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME`, and `MEMORY_STORE_NAME`).
 
 ## How memory is scoped
 
@@ -25,7 +26,7 @@ Builds on Step 8: the same durable workflow (gather → specialists → consolid
 
 ## Run it
 
-1. Copy `.env.example` to `.env` and fill in values, including an **embedding model deployment**, a `MEMORY_STORE_NAME`, and `FOUNDRY_SKILL_NAMES`.
+1. Copy `.env.example` to `.env` and fill in values, including an **embedding model deployment**, a `MEMORY_STORE_NAME`, and `SKILL_NAMES`.
 2. Sign in with Entra ID: `az login`. Uploading and downloading Foundry skills needs **Foundry User** (formerly Azure AI User) on the Foundry project, and the account must allow **public network access** (the Skills API does not support private networking).
 3. Install dependencies: `pip install -r travel_assistant/requirements.txt`.
 4. Provision the destinations index once (from Step 5): `python travel_indexer/provision_index.py`.

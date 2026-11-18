@@ -54,10 +54,10 @@ Then continue with **"Install the tools you'll need"** below to install Python, 
 - **A role that lets you *use* the project** — **`Foundry User`** (formerly *Azure AI User*) on the Foundry project. This is the least-privilege role for *using* a project — prefer it over broader roles like Owner or Contributor. If you created the project you already have at least this. Some steps assign extra roles as needed (Step 5 adds Azure AI Search roles; Step 6 reuses `Foundry User` for the Skills API and grants it to the deployed agent's identity).
 - **Python 3.10 or newer** (the devcontainer ships 3.12).
 - **Azure CLI (`az`)** — used by `DefaultAzureCredential` for local auth.
-- **Azure Developer CLI (`azd`)** with the [`microsoft.foundry` extension](https://learn.microsoft.com/azure/foundry/agents/how-to/install-cli-foundry-extensions) — used to scaffold, provision, run, and deploy hosted agents.
+- **Azure Developer CLI (`azd`) 1.37.0 or newer** with the [`microsoft.foundry` extensions](https://learn.microsoft.com/azure/foundry/agents/how-to/install-cli-foundry-extensions) — used to connect your Foundry project, provision, run, and deploy hosted agents from the repo-root `azure.yaml`.
 - **VS Code + [Foundry Toolkit](https://marketplace.visualstudio.com/items?itemName=ms-windows-ai-studio.windows-ai-studio)** *(optional, recommended)* — UI alternative to `azd` for running, debugging, and deploying hosted agents.
 - **[GitHub Copilot CLI](https://github.com/github/copilot-cli) (`copilot`)** *(optional, recommended)* — AI-powered CLI assistant. Install with `npm install -g @github/copilot` (the devcontainer installs it automatically via the `copilot-cli` feature).
-- **[Bicep](https://learn.microsoft.com/azure/azure-resource-manager/bicep/install)** *(optional, recommended)* — infrastructure-as-code language for the `azd`-generated `infra/`. Install the CLI with `az bicep install` and the [Bicep VS Code extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-bicep) for language support.
+- **[Bicep](https://learn.microsoft.com/azure/azure-resource-manager/bicep/install)** *(optional, recommended)* — infrastructure-as-code language used across Azure samples and templates. Install the CLI with `az bicep install` and the [Bicep VS Code extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-bicep) for language support.
 - **[Azure Skills](https://github.com/microsoft/azure-skills)** *(optional, recommended)* — Azure skills and MCP server configurations for AI coding assistants. In VS Code install the [Azure MCP extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-azure-mcp-server); for the GitHub Copilot CLI run `/plugin marketplace add microsoft/azure-skills` then `/plugin install azure@azure-skills`. Requires **Node.js 18+** (the MCP servers run via `npx`) and an authenticated `az login` for the Azure tools.
 - **[`uv`](https://docs.astral.sh/uv/)** *(optional)* — a faster drop-in for `pip`/`venv`. Anywhere this workshop says `pip` or `python -m venv` you can use `uv pip` or `uv venv` instead.
 
@@ -152,10 +152,12 @@ Full instructions: [Install `uv`](https://docs.astral.sh/uv/getting-started/inst
    ```
 2. **Sign in to azd and install the Foundry extension** (one-time):
    ```bash
+   azd version
    azd auth login
    azd ext install microsoft.foundry
+   azd ext upgrade microsoft.foundry
    ```
-   This adds the `azd ai agent ...` subcommands used from Step 1 onward to scaffold `azure.yaml`/`infra/`, provision Foundry resources, run the agent locally, deploy, and invoke. `microsoft.foundry` is a meta-package that installs all the Foundry `azd ai` extensions — see [Install the Azure Developer CLI Foundry extensions](https://learn.microsoft.com/azure/foundry/agents/how-to/install-cli-foundry-extensions) for details. If you'd rather drive everything from VS Code, the **Foundry Toolkit** extension exposes the same operations as palette commands and a sidebar. If you have a Python virtual environment active (next substep), the Foundry Toolkit picks it up automatically when you press **F5** to debug.
+   `azd version` must report **1.37.0 or newer** ([upgrade azd](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd) if not). The install adds the `azd ai project ...` and `azd ai agent ...` subcommands used from Step 1 onward to connect your Foundry project, run the agent locally, deploy, and invoke; the upgrade makes sure an earlier install is current — the repo-root `azure.yaml` declares the minimum extension versions it needs under `requiredVersions`. `microsoft.foundry` is a meta-package that installs the core Foundry `azd ai` extensions — see [Install the Azure Developer CLI Foundry extensions](https://learn.microsoft.com/azure/foundry/agents/how-to/install-cli-foundry-extensions) for details. If you'd rather drive everything from VS Code, the **Foundry Toolkit** extension exposes the same operations as palette commands and a sidebar. If you have a Python virtual environment active (next substep), the Foundry Toolkit picks it up automatically when you press **F5** to debug.
 3. **Create and activate a Python virtual environment.**
 
    Pick one of the two options below. Option A uses the Python stdlib `venv` module and matches the rest of the workshop; Option B uses [`uv`](https://docs.astral.sh/uv/), which is significantly faster but requires installing `uv` first (see above). Both options create the environment at `.venv/`, so the activation commands are the same.
@@ -249,7 +251,7 @@ Make sure `python .workshop/scripts/preflight.py` is green (or `uv run python .w
 
 [![▶ Start the workshop](https://img.shields.io/badge/%E2%96%B6_Start_the_workshop-Step_01-2ea44f?style=for-the-badge)](https://github.com/{{OWNER}}/{{REPO}}/actions/workflows/start-workshop.yml)
 
-Click **Run workflow** to move from Setup to Step 1. Pull after the action completes. From Step 1 onward you advance by committing your work and pushing to `main` — there is no button. With setup already done, Step 1 jumps straight into authoring `agent.yaml`, `agent.manifest.yaml`, and `main.py` for your first hosted TravelBuddy agent.
+Click **Run workflow** to move from Setup to Step 1. Pull after the action completes. From Step 1 onward you advance by committing your work and pushing to `main` — there is no button. With setup already done, Step 1 jumps straight into `azure.yaml` and `main.py` for your first hosted TravelBuddy agent.
 
 ## Working fully locally (no GitHub Actions)
 

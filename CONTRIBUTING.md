@@ -21,7 +21,7 @@ The workshop README is rendered from `.workshop/docs/steps/NN-*.md`. Advancing r
 
 Advancing a step **overlays** `.workshop/step_files/NN/` onto the participant's working folder and never deletes anything, so each step only needs to ship what is genuinely new. Keep these invariants true:
 
-> `.workshop/step_files/NN/` contains **only the new files that step `NN` introduces** (starters/stubs with TODOs), plus its `STEP_README.md`. Files that an earlier step already delivered and that step `NN` merely *modifies* (for example `main.py` or `agent.manifest.yaml`) are edited in place by the participant following the step doc — they are **not** re-shipped, so the overlay never clobbers the participant's earlier work.
+> `.workshop/step_files/NN/` contains **only the new files that step `NN` introduces** (starters/stubs with TODOs), plus its `STEP_README.md`. Files that an earlier step already delivered and that step `NN` merely *modifies* (for example `main.py` or the repo-root `azure.yaml`) are edited in place by the participant following the step doc — they are **not** re-shipped, so the overlay never clobbers the participant's earlier work.
 
 > `.workshop/solutions/NN-*/` is the **complete, runnable** state at the end of step `NN`, and it must match what the step doc teaches. Never minify code in either `.workshop/step_files/` or `.workshop/solutions/` — keep it in the clean, expanded teaching style.
 
@@ -31,7 +31,7 @@ Other conventions:
 
 - `.env` is defined once in step 0; do not add `.env.example` to any later `.workshop/step_files/NN`.
 - `requirements.txt` is forward-loaded in `.workshop/step_files/00/` and carried by the overlay; do not add it to later `.workshop/step_files/NN`.
-- The model is pre-deployed in step 0 and selected at runtime via `AZURE_AI_MODEL_DEPLOYMENT_NAME`, so agent manifests use `resources: []` (only declare non-model resources such as a toolbox when a step actually adds one).
+- The model is pre-deployed in step 0 and selected at runtime via `AZURE_AI_MODEL_DEPLOYMENT_NAME`, so it is never declared in `azure.yaml`. The repo-root `azure.yaml` ships once (from `.workshop/step_files/01/_root/`); later steps only tell participants to add `env` entries to it.
 
 ## Adding a new step
 

@@ -7,15 +7,15 @@
 - What the **Model Context Protocol (MCP)** is and why hosted agents can talk to MCP servers natively
 - The difference between **function tools** (Step 2, local Python) and **MCP tools** (this step, a remote standardised server) — and why they coexist in the same agent
 - How to register a remote MCP server in code with `client.get_mcp_tool(...)` and what `approval_mode` controls
-- How the manifest declares the MCP server's configuration through environment variables
-- Why adding an MCP tool changes your code and config but **not** your deployment shape (still `resources: []`)
+- How `azure.yaml` passes the MCP server's configuration to the hosted agent through environment variables
+- Why adding an MCP tool changes your code and config but **not** your deployment shape (no new Azure resources, no `azd provision`)
 
 ## What's already in the repo
 
-- `travel_assistant/main.py`, `travel_assistant/tools.py`, `agent.yaml`, `agent.manifest.yaml` — carried over from Step 2 (your TravelBuddy agent with the three function tools). Nothing was deleted when you advanced; your Step 2 work is preserved.
+- `travel_assistant/main.py`, `travel_assistant/tools.py`, and the repo-root `azure.yaml` — carried over from Step 2 (your TravelBuddy agent with the three function tools). Nothing was deleted when you advanced; your Step 2 work is preserved.
 - The MCP settings are already listed in `.env.example` (`MCP_SERVER_LABEL`, `MCP_SERVER_URL`); this step starts using them.
 
-In this step you make **delta-only** edits: add the MCP env vars to `.env`, add one line to `main.py` to register the MCP tool, append one sentence to TravelBuddy's instructions, and update the manifest metadata. You do **not** rewrite `main.py`, `tools.py`, or the YAML files from scratch — you add to the files you finished in Step 2.
+In this step you make **delta-only** edits: add the MCP env vars to `.env`, add one line to `main.py` to register the MCP tool, append one sentence to TravelBuddy's instructions, and update `azure.yaml` (metadata plus two `env` entries). You do **not** rewrite `main.py`, `tools.py`, or `azure.yaml` from scratch — you add to the files you finished in Step 2.
 
 ## Concept (5-min read)
 
@@ -115,91 +115,48 @@ Then **keep your Step 2 instructions exactly as they are** and append one MCP se
 
 That's the whole code change. `client.get_mcp_tool(...)` reads the label and URL from the environment (the same values you just added to `.env`) and hands the agent a remote tool. Everything else in `main.py` — the `FoundryChatClient` setup, the three function tools, `default_options={"store": False}`, and `ResponsesHostServer(agent).run()` — is unchanged from Step 2. If you get stuck, the finished file is in [`.workshop/solutions/03-mcp/`](.workshop/solutions/03-mcp/).
 
-> **Why `os.environ[...]` and not a hardcoded URL?** Reading the label and URL from the environment keeps them out of source control and lets you point at a different MCP server (or the authenticated variant in Troubleshooting) by editing `.env` — no code change. The hosted runtime gets the same values from the manifest at deploy time.
+> **Why `os.environ[...]` and not a hardcoded URL?** Reading the label and URL from the environment keeps them out of source control and lets you point at a different MCP server (or the authenticated variant in Troubleshooting) by editing `.env` — no code change. The hosted runtime gets the same values through the `env` map in `azure.yaml`, resolved from your azd environment.
 
-### 3. Update `travel_assistant/agent.manifest.yaml`
+### 3. Update the agent's metadata and `env` in `azure.yaml`
 
-An MCP connection is made **in code** and configured through **environment variables**, so the manifest structure barely changes — same `template`, same `protocols`, and `resources` stays empty (`[]`) because no new Azure resource is needed. This step makes two kinds of edit: **metadata** (update the human-facing `description`, add an `MCP Tools` tag and an MCP entry to `tool_declarations`) and **configuration** (add the two MCP environment variables so the hosted runtime receives them).
-
-Update the `description`:
+An MCP connection is made **in code** and configured through **environment variables**, so the hosted-agent shape barely changes — same container, same `protocols`, and no new Azure resource, because the connection is just an outbound HTTPS call from the running container. This step makes two kinds of edit to the `travel-buddy` service in the repo-root `azure.yaml`: **metadata** (update the human-facing `description` and add an `MCP Tools` tag) and **configuration** (add the two MCP variables to the `env` map so both the local run and the deployed agent receive them):
 
 ```yaml
-# travel_assistant/agent.manifest.yaml
-description: >
-  TravelBuddy is an Agent Framework hosted agent with local Python function tools
-  for weather, local time, and currency, plus an OctoTrip Flights MCP connection for
-  live flight search.
+# azure.yaml — under services: travel-buddy:
+    description: TravelBuddy with local function tools plus the OctoTrip Flights MCP server for live flight search.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+        - Function Tools
+        - MCP Tools           # <-- added
+    # ... protocols unchanged ...
+    env:
+      PYTHONNOUSERSITE: "1"
+      AZURE_AI_PROJECT_ENDPOINT: ${FOUNDRY_PROJECT_ENDPOINT}
+      AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+      WORKSHOP_RESOURCE_PREFIX: ${WORKSHOP_RESOURCE_PREFIX}
+      MCP_SERVER_LABEL: ${MCP_SERVER_LABEL}   # <-- added
+      MCP_SERVER_URL: ${MCP_SERVER_URL}       # <-- added
 ```
 
-Extend `metadata` — add the `MCP Tools` tag and an MCP entry alongside the Step 2 `tool_declarations` (keep the three function-tool entries):
-
-```yaml
-metadata:
-  tags:
-    - Agent Framework
-    - AI Agent Hosting
-    - Azure AI AgentServer
-    - Responses Protocol
-    - Travel Assistant
-    - Function Tools
-    - MCP Tools           # <-- added
-  tool_declarations:
-    # ... keep the get_weather / get_local_time / convert_currency entries ...
-    - name: octotrip-flights         # <-- added: the remote MCP tool group
-      description: OctoTrip Flights MCP server for live flight search.
-      type: mcp
-      url: ${MCP_SERVER_URL}
-```
-
-Then add the two MCP variables to the **existing** `template.environment_variables` list (keep the Step 1/Step 2 entries):
-
-```yaml
-template:
-  # ... name, kind, protocols unchanged ...
-  environment_variables:
-    # ... AZURE_AI_PROJECT_ENDPOINT, AZURE_AI_MODEL_DEPLOYMENT_NAME, WORKSHOP_RESOURCE_PREFIX ...
-    - name: MCP_SERVER_LABEL         # <-- added
-      value: ${MCP_SERVER_LABEL}
-    - name: MCP_SERVER_URL           # <-- added
-      value: ${MCP_SERVER_URL}
-
-resources: []                        # <-- unchanged: no new Azure resource
-```
-
-`tool_declarations` is **descriptive metadata** — it documents the agent's capabilities for humans and tooling that browse the manifest. The MCP tools are still connected in code via `client.get_mcp_tool(...)`; the MCP server itself decides which concrete tools it exposes at connect time. `resources` stays `[]` because MCP adds no Azure resource — the connection is an outbound HTTPS call from the running container.
-
-### 4. Add the MCP env vars to `travel_assistant/agent.yaml`
-
-`agent.yaml` is the local hosted-agent runtime definition, so it carries its **own** environment-variable list. Add the same two MCP variables here so the **local** run (`azd ai agent run`) picks them up — the hosted `agent.yaml` and the manifest's `template` share the same environment contract, but each file declares the variables it needs:
-
-```yaml
-# travel_assistant/agent.yaml
-environment_variables:
-  # ... AZURE_AI_PROJECT_ENDPOINT, AZURE_AI_MODEL_DEPLOYMENT_NAME, WORKSHOP_RESOURCE_PREFIX ...
-  - name: MCP_SERVER_LABEL           # <-- added
-    value: ${MCP_SERVER_LABEL}
-  - name: MCP_SERVER_URL             # <-- added
-    value: ${MCP_SERVER_URL}
-```
-
-Leave the `name`, `kind`, `protocols`, and CPU/memory blocks exactly as they were. No new Azure resource is declared, so you won't need to re-provision — but because `azd ai agent init` **copied** your code and manifest into the project folder in earlier steps, you'll re-run `azd ai agent init` in the next section to refresh that copy before deploying.
+Each `${VAR}` is resolved from your **azd environment** (`.azure/<env-name>/.env`), not from the repo `.env` — you'll copy the two new values across in the next section. The MCP tools themselves are still connected in code via `client.get_mcp_tool(...)`, and the MCP server decides which concrete tools it exposes at connect time — `azure.yaml` describes how the agent is hosted, not what it can do. Leave the rest of the file (`name`, `container`, …) exactly as it was in Step 2.
 
 ## Run and deploy TravelBuddy
 
-**Do you need to re-init? Yes.** In the earlier steps, `azd ai agent init` **copied** your `travel_assistant/` code into the generated `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder — that copy is the snapshot azd actually builds and deploys. Your Step 3 edits live in `travel_assistant/` (the `main.py` MCP tool line, the appended instruction, and the manifest/`agent.yaml` changes), so the copied snapshot is now **stale**. Re-run `azd ai agent init` to refresh it before you run or deploy; it re-copies the current `travel_assistant/` code and re-reads the updated `agent.manifest.yaml`.
+**Your code changes need no extra setup.** `azd` packages `travel_assistant/` straight from your working tree on every `azd ai agent run` and `azd deploy`, so your `main.py` changes are picked up automatically. You do **not** need `azd provision` again either — you added no new Azure resources, so the infrastructure from earlier steps is unchanged. The only new setup is copying the two MCP values into the azd environment. Run every command from the **repo root**.
 
-You do **not** need `azd provision` again — you added no new Azure resources (`resources:` is still `[]`), so the infrastructure from earlier steps is unchanged. The re-init just refreshes the copied code + manifest, and then `azd deploy` ships the new container version.
-
-> Prefer not to re-init? You can instead copy your edited `travel_assistant/main.py` (and the updated YAML) into the code directory inside `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` and skip straight to `azd deploy`. Re-init is the reliable path because it also picks up the manifest changes and can't drift out of sync.
-
-1. **Re-init from the repository root.** Load your `.env` into the shell first — the repo `.env` isn't auto-loaded, and the shell needs `WORKSHOP_RESOURCE_PREFIX` to expand `--agent-name` (and to `cd` into the folder later):
+1. **Add the new MCP values to the azd env.** azd keeps its **own** environment store (`.azure/<env-name>/.env`), separate from the repo `.env`. The Foundry values are already in the azd env from Step 1, so you only need to set the **two new** MCP variables. Load your `.env` into the shell first (the repo `.env` isn't auto-loaded), then pass the values through:
 
    <!-- terminal -->
    ```bash
    # bash / zsh
    set -a; source .env; set +a
-   azd ai agent init -m travel_assistant/agent.manifest.yaml \
-     --agent-name "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+   azd env set MCP_SERVER_LABEL "$MCP_SERVER_LABEL"
+   azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
    ```
 
    <!-- terminal -->
@@ -209,40 +166,20 @@ You do **not** need `azd provision` again — you added no new Azure resources (
      $name, $value = $_ -split '=', 2
      Set-Item "Env:$($name.Trim())" $value.Trim()
    }
-   azd ai agent init -m travel_assistant/agent.manifest.yaml `
-     --agent-name "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   ```
-
-   This refreshes the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` folder with your updated `main.py` and the updated manifest metadata (including the new MCP environment variables).
-
-2. **`cd` into the project folder and add the new MCP values to the azd env.** azd keeps its **own** environment store (`.azure/<env-name>/.env`), separate from the repo `.env`. The Foundry values (`AZURE_AI_PROJECT_ENDPOINT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `WORKSHOP_RESOURCE_PREFIX`) are already in the azd env from earlier steps, so you only need to set the **two new** MCP variables. Keep `.env` loaded in the shell so you can pass the values through:
-
-   <!-- terminal -->
-   ```bash
-   # bash / zsh — after: set -a; source .env; set +a
-   cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   azd env set MCP_SERVER_LABEL "$MCP_SERVER_LABEL"
-   azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
-   ```
-
-   <!-- terminal -->
-   ```powershell
-   # PowerShell — after loading .env into the shell
-   cd "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
    azd env set MCP_SERVER_LABEL "$env:MCP_SERVER_LABEL"
    azd env set MCP_SERVER_URL "$env:MCP_SERVER_URL"
    ```
 
-3. **Run TravelBuddy locally** in the hosted Responses runtime:
+2. **Run TravelBuddy locally** in the hosted Responses runtime:
 
    <!-- terminal -->
    ```bash
    azd ai agent run
    ```
 
-   `azd` reads `agent.yaml`, substitutes values from your azd environment, and starts the server on `http://localhost:8088` — now with your three function tools **and** the OctoTrip Flights MCP connection loaded. Leave this terminal running.
+   `azd` reads the `travel-buddy` service in `azure.yaml`, resolves its `env` from your azd environment, and starts the server on `http://localhost:8088` — now with your three function tools **and** the OctoTrip Flights MCP connection loaded. Leave this terminal running.
 
-4. **Invoke the local agent from a second terminal.** The `azd ai agent run` process is still holding the first terminal, so open a **new** one (in the same project folder) and ask a question that forces a flight search:
+3. **Invoke the local agent from a second terminal.** The `azd ai agent run` process is still holding the first terminal, so open a **new** one (also at the repo root) and ask a question that forces a flight search:
 
    <!-- terminal -->
    ```bash
@@ -253,16 +190,16 @@ You do **not** need `azd provision` again — you added no new Azure resources (
 
    Prefer a UI? With the local agent still running, open the **Agent Inspector** from the Foundry Toolkit (Command Palette → **Foundry Toolkit: Open Agent Inspector**). It connects to `http://localhost:8088` and shows each streamed MCP tool call and result.
 
-5. **Deploy to Foundry**:
+4. **Deploy to Foundry**:
 
    <!-- terminal -->
    ```bash
    azd deploy
    ```
 
-   This builds the container image from the **refreshed** project-folder snapshot — now including the MCP tool registration and env vars — pushes it to your Azure Container Registry, and rolls out a new hosted agent version. No `azd provision` is needed because the infrastructure is unchanged.
+   This builds the container image from `travel_assistant/` — now including the MCP tool registration — stores it to your Azure Container Registry, and rolls out a new hosted agent version that receives the two MCP env vars from `azure.yaml`. No `azd provision` is needed because the infrastructure is unchanged.
 
-6. **Invoke the deployed agent**:
+5. **Invoke the deployed agent**:
 
    <!-- terminal -->
    ```bash
@@ -328,7 +265,7 @@ MCP_SERVER_URL=https://<generated-id>-8931.<region>.devtunnels.ms/mcp
 
 <!-- terminal -->
 ```bash
-cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+# from the repo root
 azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
 ```
 
@@ -340,14 +277,14 @@ Switch back to `https://mcp.octotrip.app/flights/mcp` once the real server answe
 
 ### No MCP tools listed
 
-Confirm the two settings are in **both** `.env` and the manifest, and that `main.py` actually appends `client.get_mcp_tool(...)` to the `tools` list passed to `Agent`.
+Confirm the two settings are in `.env`, in the azd environment (`azd env get-values`), and in the `env` map of the `travel-buddy` service in `azure.yaml`, and that `main.py` actually appends `client.get_mcp_tool(...)` to the `tools` list passed to `Agent`.
 
 Common mistakes:
 
-- putting `environment_variables` under `resources` instead of `template`;
-- using `environmentVariables` instead of `environment_variables`;
-- adding `MCP_SERVER_LABEL` / `MCP_SERVER_URL` to `.env` but not to the manifest;
-- forgetting to restart the agent (or re-run `azd ai agent init`) after editing `.env` or the manifest.
+- adding the `env` entries under the `ai-project` service instead of `travel-buddy`;
+- adding `MCP_SERVER_LABEL` / `MCP_SERVER_URL` to `.env` but not running `azd env set` for them (azd never reads the repo `.env`);
+- adding them to the azd environment but not to the `env` map in `azure.yaml`;
+- forgetting to restart `azd ai agent run` (or redeploy) after changing the values.
 
 ### The local function tools stopped working
 
@@ -368,7 +305,7 @@ mcp_tool = client.get_mcp_tool(
 )
 ```
 
-Do not commit tokens to `.env.example`, `agent.manifest.yaml`, or source control. Use your local `.env` or the deployment environment's secret store.
+Do not commit tokens to `.env.example`, `azure.yaml`, or source control. Use your local `.env` or the deployment environment's secret store.
 
 ### The agent answers without searching flights
 
@@ -376,7 +313,7 @@ Make the prompt explicit: give an origin, a destination (IATA codes work well), 
 
 ### Deploy didn't pick up my MCP change
 
-`azd ai agent init` **copied** your code into the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder, so edits in `travel_assistant/` don't deploy on their own. Re-run `azd ai agent init` (step 1 above) to refresh that snapshot — or copy your edited files into the folder's code directory — then `azd deploy` again.
+Make sure you ran `azd env set` for `MCP_SERVER_LABEL` and `MCP_SERVER_URL` (step 1 above), that both have an entry in the `env` map of the `travel-buddy` service in `azure.yaml`, and then run `azd deploy` again from the repo root (where `azure.yaml` lives).
 
 ## Solution
 

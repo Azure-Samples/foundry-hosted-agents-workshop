@@ -220,3 +220,5 @@ __marimo__/
 # Workshop local backups/state
 .workshop-state.bak
 *.bak
+# azd environments (per-learner state created by azd env new / azd ai project add)
+.azure/

@@ -8,7 +8,8 @@ Builds on Step 4: keeps the function tools (`get_weather`, `get_local_time`, `co
 
 This solution mirrors the repo layout after advancing to Step 5 — three sibling folders plus a shared `.env`:
 
-- `travel_assistant/` — the agent (`main.py`, `tools.py`, `agent.yaml`, `agent.manifest.yaml`, `requirements.txt`, `Dockerfile`, `data/itinerary.csv`). This is what `azd ai agent init` snapshots.
+- `azure.yaml` — the azd project file (copy it to your repo root). Its `travel-buddy` service points at `travel_assistant/` and now also passes `AZURE_AI_SEARCH_ENDPOINT` and `AZURE_AI_SEARCH_INDEX_NAME`.
+- `travel_assistant/` — the agent (`main.py`, `tools.py`, `requirements.txt`, `Dockerfile`, `data/itinerary.csv`). This is what `azd deploy` packages into the container.
 - `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` so the provisioning script and corpus are never swept into the deployed agent snapshot.
 - `travel_toolbox/` — the toolbox definition (`toolbox.yaml`), a sibling of `travel_assistant/` so it is never swept into the agent snapshot.
 - `.env.example` — shared configuration, a sibling of all three folders.

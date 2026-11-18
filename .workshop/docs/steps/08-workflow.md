@@ -31,7 +31,7 @@ A **workflow** is the opposite trade-off. You choose it when the process has a *
 
 **Human-in-the-loop.** An executor calls `ctx.request_info(request_data=..., response_type=...)` to pause and ask an outside party a question; a `@response_handler` method resumes the graph when the answer arrives. Locally you drive this with a streaming loop that feeds `responses=` back into `workflow.run(...)`. When the workflow is **hosted as an agent**, the same request is surfaced to the caller as a **function call** — so the pattern still works over the Responses protocol, it just arrives as a tool call rather than a plain prompt.
 
-**Hosting.** `workflow.as_agent()` wraps the whole graph as a single agent, validated so its start executor accepts the input, with a session managing conversation state. That means hosting and deployment are identical to every earlier step: one agent, `ResponsesHostServer`, `resources: []`. As in Step 7, all the executors run **in-process** inside that one hosted agent — the same in-process vs. remote-A2A trade-off applies if you ever need a step owned or scaled independently.
+**Hosting.** `workflow.as_agent()` wraps the whole graph as a single agent, validated so its start executor accepts the input, with a session managing conversation state. That means hosting and deployment are identical to every earlier step: one agent, `ResponsesHostServer`, the same `travel-buddy` service in `azure.yaml`, and no new azd-managed resources. As in Step 7, all the executors run **in-process** inside that one hosted agent — the same in-process vs. remote-A2A trade-off applies if you ever need a step owned or scaled independently.
 
 ```mermaid
 flowchart LR
@@ -61,7 +61,7 @@ The doubled `consolidate` node is where the checkpoint is written — the safe r
 
 Step 7 built the specialists inline inside `build_travel_coordinator()`. Extract that construction into factories and a shared client helper, then delete `build_travel_coordinator()`: Step 8 replaces the Step 7 group chat with the durable **workflow**, which builds the **same** agents from these factories. The factories are now the single source of truth the workflow reads.
 
-As in Step 7, the `agents/*/agent.yaml` slices remain **documentation** — nothing loads them at runtime. The workflow imports these Python factories, so `coordinator.py` stays the single executable source of truth for what each specialist is and may touch.
+As in Step 7, the `agents/*/specialist.yaml` reference cards remain **documentation** — nothing loads them at runtime. The workflow imports these Python factories, so `coordinator.py` stays the single executable source of truth for what each specialist is and may touch.
 
 ```python
 # travel_assistant/coordinator.py (delta)
@@ -208,7 +208,7 @@ def build_workflow_agent(require_approval: bool = False) -> Agent:
 
 Do **not** copy the specialist prompts into `workflow.py` — import the factories so Steps 7 and 8 stay aligned.
 
-> **Skipped the Foundry skill?** The finalize step inherits the Step 7 rule: if you left `FOUNDRY_SKILL_NAMES` unset, carry your local-only skills provider here instead of the solution's `_build_skills_provider`, and drop the `response-guardrails` line from `FINALIZE_INSTRUCTIONS`. The local `travel-guide` skill still renders the PDF.
+> **Skipped the Foundry skill?** The finalize step inherits the Step 7 rule: if you left `SKILL_NAMES` unset, carry your local-only skills provider here instead of the solution's `_build_skills_provider`, and drop the `response-guardrails` line from `FINALIZE_INSTRUCTIONS`. The local `travel-guide` skill still renders the PDF.
 
 ### 3. Point `main.py` at the workflow
 
@@ -230,32 +230,31 @@ if __name__ == "__main__":
     main()
 ```
 
-### 4. Update the manifest
+### 4. Update the agent's metadata in `azure.yaml`
 
-Metadata-only: append the `Workflows` tag, update the `description`, and add a `workflow` block describing the graph. No new `template.environment_variables`; `resources` stays `[]`.
+Metadata-only: in the `travel-buddy` service of the repo-root `azure.yaml`, update the `description` and append the `Workflows` tag. There are no new `env` entries.
 
 ```yaml
-# travel_assistant/agent.manifest.yaml (delta)
-metadata:
-  tags:
-    - Agent Framework
-    - AI Agent Hosting
-    - Azure AI AgentServer
-    - Responses Protocol
-    - Travel Assistant
-    - Function Tools
-    - MCP Tools
-    - Toolbox Tools
-    - RAG
-    - Skills
-    - Multi-Agent
-    - Workflows
-  workflow:
-    start: gather_preferences
-    executors: [gather_preferences, flights, hotels, activities, consolidate, finalize_itinerary]
-    checkpointing: FileCheckpointStorage
-    human_in_the_loop: optional (approval_gate via request_info)
+# azure.yaml — under services: travel-buddy:
+    description: TravelBuddy as a durable Agent Framework workflow - gather, consolidate, and finalize steps over the     Flights, Hotels, and Activities specialists.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+        - Function Tools
+        - MCP Tools
+        - Toolbox Tools
+        - RAG
+        - Skills
+        - Foundry Skills
+        - Multi-Agent
+        - Workflows     # <-- added
 ```
+
+The workflow graph itself — executors, edges, checkpointing, the optional approval gate — is wired in code in `workflow.py`; `azure.yaml` describes how the agent is hosted, not how it works inside. Leave the rest of the file exactly as it was in Step 7.
 
 ### 5. (Optional) Add a human approval gate
 
@@ -303,35 +302,13 @@ When hosted, that `request_info` is surfaced to the caller as a **function call*
 
 ## Run and deploy TravelBuddy
 
-`azd ai agent init` **copies** your `travel_assistant/` code into the generated `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder — that copy is the snapshot azd builds and deploys. You changed code in `travel_assistant/`, so **re-init** to refresh the snapshot. There are **no** new variables to `azd env set` (reuse the azd environment from earlier steps) and you do **not** run `azd provision` — you added no Azure resource (`resources:` is still `[]`).
+**No new setup needed.** `azd` packages `travel_assistant/` straight from your working tree on every `azd ai agent run` and `azd deploy`, so your new `workflow.py` and the `coordinator.py` / `main.py` changes are picked up automatically. There are **no** new variables to `azd env set` (reuse the azd environment from earlier steps) and you do **not** run `azd provision` — you added no Azure resource. Run every command from the **repo root**.
 
-1. **Re-init from the repository root.** Load your `.env` into the shell first so `WORKSHOP_RESOURCE_PREFIX` expands:
-
-   <!-- terminal -->
-   ```bash
-   # bash / zsh
-   set -a; source .env; set +a
-   azd ai agent init -m travel_assistant/agent.manifest.yaml \
-     --agent-name "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   ```
-
-   <!-- terminal -->
-   ```powershell
-   # PowerShell
-   Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
-     $name, $value = $_ -split '=', 2
-     Set-Item "Env:$($name.Trim())" $value.Trim().Trim('"').Trim("'")
-   }
-   azd ai agent init -m travel_assistant/agent.manifest.yaml `
-     --agent-name "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   ```
-
-2. **Run TravelBuddy locally** and invoke the workflow from a second terminal:
+1. **Run TravelBuddy locally** and invoke the workflow from a second terminal (also at the repo root):
 
    <!-- terminal -->
    ```bash
-   # terminal 1 — from the project folder:
-   cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+   # terminal 1 — from the repo root:
    azd ai agent run
    ```
 
@@ -343,7 +320,7 @@ When hosted, that `request_info` is surfaced to the caller as a **function call*
 
    A good trace shows `gather_preferences`, then `flights` / `hotels` / `activities` running together, then `consolidate`, then `finalize_itinerary`. Checkpoints appear under `.workshop-state/workflow-checkpoints/`.
 
-3. **Deploy to Foundry** and invoke the deployed agent:
+2. **Deploy to Foundry** and invoke the deployed agent:
 
    <!-- terminal -->
    ```bash
@@ -351,7 +328,7 @@ When hosted, that `request_info` is surfaced to the caller as a **function call*
    azd ai agent invoke "Plan a 5-day Tokyo trip for two with a budget of €3000."
    ```
 
-   `azd deploy` builds the container image from the **refreshed** snapshot, pushes it, and rolls out a new hosted agent version. The whole workflow deploys **inside** the single container, so nothing else is needed — no role grant, no `azd provision`.
+   `azd deploy` packages `travel_assistant/`, builds the container image, pushes it, and rolls out a new hosted agent version. The whole workflow deploys **inside** the single container, so nothing else is needed — no role grant, no `azd provision`.
 
 ## Try it
 
@@ -397,7 +374,7 @@ Hosted workflow-agents surface `request_info` as a **function call**, not a prom
 
 ### Deploy didn't pick up my change
 
-`azd ai agent init` **copied** your code into `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`. Re-run `azd ai agent init`, then `azd deploy` again.
+Make sure you ran `azd deploy` from the repo root (where `azure.yaml` lives) after saving `workflow.py`, `coordinator.py`, and `main.py`, and that none of them is listed in `travel_assistant/.azdignore`.
 
 ## Solution
 

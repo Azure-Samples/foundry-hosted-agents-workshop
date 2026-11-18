@@ -39,8 +39,8 @@ STEP_FILES_DIR = ".workshop/step_files"
 # Reserved subfolder inside .workshop/step_files/<step>/. Its contents are laid down
 # at the repository root (as siblings of travel_assistant/) instead of inside
 # travel_assistant/. This lets a step ship files that must live outside the agent
-# snapshot — e.g. travel_toolbox/toolbox.yaml, which azd ai agent init must not
-# copy into the deployed agent.
+# snapshot — e.g. azure.yaml (the azd project file) or travel_toolbox/toolbox.yaml,
+# which must not be packaged into the deployed agent's container.
 ROOT_OVERLAY_DIR = "_root"
 BACKUPS_DIR = ".workshop_instance/workshop_backups"
 # Backups are namespaced so the agent snapshot and the repo-root overlay targets

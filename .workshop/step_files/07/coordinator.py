@@ -7,16 +7,16 @@ RAG provider, the Step 6 trusted script runner and skills provider, the manager
 
 **Your job is the one TODO below: complete the specialist block.** ``FlightsSpecialist``
 is written for you as the worked example — add ``HotelsSpecialist`` and
-``ActivitiesSpecialist`` the same way, by reading each ``agents/<name>/`` slice pair
-(``agent.yaml`` for the role, ``agent.manifest.yaml`` for the capabilities) and
+``ActivitiesSpecialist`` the same way, by reading each ``agents/<name>/specialist.yaml``
+card (identity and instructions at the top, ``capabilities:`` below) and
 translating it into an ``Agent(...)``.
 That capability slicing is what this step teaches. Follow Step 7 in the root
 ``README.md``.
 
-The per-specialist ``agents/<name>/agent.yaml`` + ``agent.manifest.yaml`` slices
+The per-specialist ``agents/<name>/specialist.yaml`` cards
 *describe* each specialist's role and capability boundary, but nothing loads them
 at runtime — **this file is the executable source of truth**, so keep the two in
-sync: the slice is the reviewable contract, this file is what runs.
+sync: the card is the reviewable contract, this file is what runs.
 
 Stuck? The complete, runnable version lives at
 .workshop/solutions/07-multi-agent/travel_assistant/coordinator.py.
@@ -230,8 +230,8 @@ SKILL_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 
 
 def _foundry_skill_names() -> list[str]:
-    """Parse FOUNDRY_SKILL_NAMES, treating an unresolved ${VAR}/{{VAR}} as empty."""
-    raw = os.environ.get("FOUNDRY_SKILL_NAMES", "").strip()
+    """Parse SKILL_NAMES, treating an unresolved ${VAR}/{{VAR}} as empty."""
+    raw = os.environ.get("SKILL_NAMES", "").strip()
     if (raw.startswith("${") and raw.endswith("}")) or (raw.startswith("{{") and raw.endswith("}}")):
         raw = ""
     parsed = [name.strip().strip('"').strip("'") for name in raw.split(",")]
@@ -283,9 +283,9 @@ def _build_skills_provider() -> TrustedSkillsProvider:
     names = _foundry_skill_names()
     if not names:
         raise RuntimeError(
-            "FOUNDRY_SKILL_NAMES is empty. Upload the Foundry skill once with "
+            "SKILL_NAMES is empty. Upload the Foundry skill once with "
             "`python foundry_skills/provision_skills.py`, then set "
-            'FOUNDRY_SKILL_NAMES=response-guardrails so the agent can download it at startup.'
+            'SKILL_NAMES=response-guardrails so the agent can download it at startup.'
         )
     asyncio.run(
         asyncio.wait_for(
@@ -336,14 +336,14 @@ def build_travel_coordinator() -> Agent:
     # TODO (the exercise): complete the specialist block — Flights is done,
     # add Hotels and Activities.
     #
-    # Read each agents/<name>/agent.yaml + agent.manifest.yaml slice and translate
-    # it into an Agent(...) below:
+    # Read each agents/<name>/specialist.yaml card and translate it into an
+    # Agent(...) below:
     #   - `name:`        -> name=...            (the manager routes by name)
     #   - `description:` -> description=...     (feeds the manager's routing prompt)
     #   - `instructions:`-> instructions=<the matching constant above>
-    #   - `tools:`       -> tools=[...]         (function tools + `toolbox`)
-    #   - `rag:`         -> context_providers=[search]
-    #   - `skills:`      -> context_providers=[search, skills]   (Activities only)
+    #   - `capabilities.tools:`  -> tools=[...]   (function tools + `toolbox`)
+    #   - `capabilities.rag:`    -> context_providers=[search]
+    #   - `capabilities.skills:` -> context_providers=[search, skills]   (Activities only)
     # Give every specialist default_options={"store": False}, exactly as in Steps 1-6.
     #
     # The worked example — Flights, from agents/flights/:
