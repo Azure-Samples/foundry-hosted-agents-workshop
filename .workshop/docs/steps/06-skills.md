@@ -309,7 +309,7 @@ The skill itself is wired in code via `context_providers=[...]` in `main.py` —
    azd ai agent invoke "Make me a 3-day Reykjavik travel guide for winter as a PDF."
    ```
 
-   `azd deploy` builds the container image from `travel_assistant/` — now including `skills/travel-guide/` and your updated `main.py` — pushes it, and rolls out a new hosted agent version. The local skill deploys **inside** the container, so nothing else is needed — no role grant, no `azd provision`.
+   `azd deploy` uploads `travel_assistant/` as source — now including `skills/travel-guide/` and your updated `main.py` — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version. The local skill is included in that source package, so nothing else is needed — no role grant, no container registry, no `azd provision`.
 
    Prefer a UI? Open the **Hosted Agent Playground** from the Foundry Toolkit (**Developer Tools** → **Build** → **Hosted Agent Playground**), pick your deployed agent and version, and ask for a guide — the generated PDF shows up under **Session Details → Files**.
 
@@ -585,7 +585,7 @@ Each `${VAR}` in `env` is resolved from your **azd** environment, not from the r
    azd deploy
    ```
 
-   This builds the container image from `travel_assistant/` — now including your Part B `main.py` — and rolls out a new hosted agent version with `SKILL_NAMES` in its environment. Still no `azd provision` (infrastructure is unchanged).
+   `azd deploy` uploads `travel_assistant/` — now including your Part B `main.py` — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version with `SKILL_NAMES` in its environment. Still no container registry or `azd provision`.
 
 4. **Grant the deployed agent's instance identity `Foundry User` on the project.** Locally the agent downloaded the Foundry skill as *you*. Deployed, your `main.py` calls the Skills API with `DefaultAzureCredential`, which resolves the container's runtime identity — the agent's **instance identity** (a per-agent Microsoft Entra service principal). That principal has **no** skills access by default, so the download would fail with `Forbidden`. Grant it the **same** `Foundry User` role you hold.
 

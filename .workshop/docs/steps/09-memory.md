@@ -254,7 +254,7 @@ python travel_assistant/provision_memory_store.py
    azd deploy
    ```
 
-   This packages `travel_assistant/`, builds the container image, and rolls out a new hosted agent version with the two new variables in its environment.
+   `azd deploy` uploads `travel_assistant/` as source, and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version with the two new variables in its environment. No container registry is needed.
 
 4. **Invoke the deployed agent:**
 

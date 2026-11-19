@@ -100,7 +100,7 @@ tools:
 - The **`mcp`** entry is the OctoTrip flights server **migrated in from Step 3**. Because it's public and anonymous, you give it a `server_label` and `server_url` and nothing else. (A tool that needs auth would instead reference a `project_connection_id` — a named connection stored in the project.)
 - `require_approval: "never"` lets the runtime call each tool automatically without pausing for human approval — appropriate for these read-only, public capabilities.
 
-> **Why does this file live at the repo root, not in `travel_assistant/`?** `azd` packages **only the `travel_assistant/` folder** (the `project:` of the `travel-buddy` service in `azure.yaml`) into the agent's container image. The toolbox is created separately (Step 2) and referenced only by endpoint, so its definition must sit **outside** the agent folder — otherwise it would be needlessly copied into the agent image. Keeping `travel_toolbox/` a sibling of `travel_assistant/` keeps the two concerns separate.
+> **Why does this file live at the repo root, not in `travel_assistant/`?** `azd` uploads **only the `travel_assistant/` folder** (the `project:` of the `travel-buddy` service in `azure.yaml`) as the agent's source package. The toolbox is created separately (Step 2) and referenced only by endpoint, so its definition must sit **outside** the agent folder — otherwise it would be needlessly copied into the agent package. Keeping `travel_toolbox/` a sibling of `travel_assistant/` keeps the two concerns separate.
 
 ### 2. Create the toolbox in your Foundry project
 
@@ -301,7 +301,7 @@ The toolbox is connected in code via `FoundryToolbox(credential)`, and the toolb
    azd deploy
    ```
 
-   This builds the container image from `travel_assistant/` — now consuming the toolbox — stores it to your Azure Container Registry, and rolls out a new hosted agent version. No `azd provision` is needed because the infrastructure is unchanged.
+   `azd` uploads `travel_assistant/` as source — now consuming the toolbox — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version. No container registry or `azd provision` is needed.
 
 5. **Invoke the deployed agent**:
 

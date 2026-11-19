@@ -25,7 +25,7 @@ Pick one of the two paths — the rest of the workshop works the same either way
 
 In your new repo, click **Code → Codespaces → Create codespace on `main`**. The first build takes ~2 minutes; after that the included devcontainer has everything pre-installed:
 
-- Python 3.12, `az` CLI (with Bicep), `azd` CLI, `uv`, `git`, `gh`, Node.js, GitHub Copilot CLI (`copilot`)
+- Python 3.13, `az` CLI (with Bicep), `azd` CLI, `uv`, `git`, `gh`, Node.js, GitHub Copilot CLI (`copilot`)
 - VS Code extensions: **Python**, **Pylance**, **Python Debugger**, **Foundry Toolkit**, **Bicep**, **Azure MCP Server (Azure Skills)**, **YAML**, **GitHub Pull Requests**
 - The **Azure Skills** plugin for the GitHub Copilot CLI is installed (its Azure MCP + Foundry MCP tools require `az login` at use time)
 - The post-create step has already created `.venv/` and installed workshop dependencies from `travel_assistant/requirements.txt` (or `.workshop/step_files/00/requirements.txt`) plus `.workshop/scripts/requirements.txt`
@@ -51,10 +51,10 @@ Then continue with **"Install the tools you'll need"** below to install Python, 
 **Prerequisites at a glance:**
 
 - **Azure subscription** with access to a Foundry project and a deployed model such as `gpt-4o-mini` or `gpt-4.1-mini`. See [Create a Foundry project](https://learn.microsoft.com/azure/ai-foundry/how-to/create-projects).
-- **A role that lets you *use* the project** — **`Foundry User`** (formerly *Azure AI User*) on the Foundry project. This is the least-privilege role for *using* a project — prefer it over broader roles like Owner or Contributor. If you created the project you already have at least this. Some steps assign extra roles as needed (Step 5 adds Azure AI Search roles; Step 6 reuses `Foundry User` for the Skills API and grants it to the deployed agent's identity).
-- **Python 3.10 or newer** (the devcontainer ships 3.12).
+- **Foundry project roles** — **`Foundry User`** (formerly *Azure AI User*) lets you use the project; **`Foundry Project Manager`** is required to deploy the hosted agent in Step 1. Request it at the project scope if you don't already have it. These are narrower than Owner or Contributor. Some steps assign extra roles as needed (Step 5 adds Azure AI Search roles; Step 6 reuses `Foundry User` for the Skills API and grants it to the deployed agent's identity). See [hosted-agent deployment permissions](https://learn.microsoft.com/azure/foundry/agents/concepts/hosted-agent-permissions).
+- **Python 3.10 or newer** for local development (the hosted agent uses Foundry's managed Python 3.13 runtime).
 - **Azure CLI (`az`)** — used by `DefaultAzureCredential` for local auth.
-- **Azure Developer CLI (`azd`) 1.37.0 or newer** with the [`microsoft.foundry` extensions](https://learn.microsoft.com/azure/foundry/agents/how-to/install-cli-foundry-extensions) — used to connect your Foundry project, provision, run, and deploy hosted agents from the repo-root `azure.yaml`.
+- **Azure Developer CLI (`azd`) 1.37.0 or newer** with the [`microsoft.foundry` extensions](https://learn.microsoft.com/azure/foundry/agents/how-to/install-cli-foundry-extensions) — used to connect your Foundry project, run, and deploy hosted agents from the repo-root `azure.yaml`.
 - **VS Code + [Foundry Toolkit](https://marketplace.visualstudio.com/items?itemName=ms-windows-ai-studio.windows-ai-studio)** *(optional, recommended)* — UI alternative to `azd` for running, debugging, and deploying hosted agents.
 - **[GitHub Copilot CLI](https://github.com/github/copilot-cli) (`copilot`)** *(optional, recommended)* — AI-powered CLI assistant. Install with `npm install -g @github/copilot` (the devcontainer installs it automatically via the `copilot-cli` feature).
 - **[Bicep](https://learn.microsoft.com/azure/azure-resource-manager/bicep/install)** *(optional, recommended)* — infrastructure-as-code language used across Azure samples and templates. Install the CLI with `az bicep install` and the [Bicep VS Code extension](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-bicep) for language support.
@@ -65,9 +65,9 @@ Then continue with **"Install the tools you'll need"** below to install Python, 
 
 - **Windows:**
   ```powershell
-  winget install --id Python.Python.3.12 -e
+  winget install --id Python.Python.3.13 -e
   ```
-- **macOS:** install from [python.org](https://www.python.org/downloads/) or `brew install python@3.12`.
+- **macOS:** install from [python.org](https://www.python.org/downloads/) or `brew install python@3.13`.
 - **Linux (Ubuntu/Debian):**
   ```bash
   sudo apt update && sudo apt install -y python3 python3-venv python3-pip

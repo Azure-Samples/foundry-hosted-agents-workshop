@@ -1,2 +1,10 @@
 .env.example
 foundry_downloaded_skills/
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.env.*

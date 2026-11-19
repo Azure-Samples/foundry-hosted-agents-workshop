@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
 #
 # azure.yaml — the single Azure Developer CLI (azd) file that describes how
-# TravelBuddy is configured, provisioned, and deployed to Microsoft Foundry.
+# TravelBuddy is configured and deployed to Microsoft Foundry.
 # It lives at the repo root (a sibling of travel_assistant/) and you keep
 # editing this same file in later steps. This solution folder holds the
 # travel_assistant/ files flat, so copy azure.yaml to your repo root.
@@ -24,14 +24,14 @@ services:
   # The hosted agent itself.
   travel-buddy:
     host: azure.ai.agent
-    # Source folder that is packaged into the container image.
+    # Source folder uploaded for source-code deployment.
     project: travel_assistant
-    # Container deploy: azd builds travel_assistant/Dockerfile remotely in the
-    # project's Azure Container Registry, so you don't need Docker locally.
-    language: docker
-    docker:
-      path: Dockerfile
-      remoteBuild: true
+    # Foundry installs requirements.txt in its managed Python runtime.
+    language: python
+    codeConfiguration:
+      runtime: python_3_13
+      entryPoint: main.py
+      dependencyResolution: remote_build
     uses:
       - ai-project
     kind: hosted

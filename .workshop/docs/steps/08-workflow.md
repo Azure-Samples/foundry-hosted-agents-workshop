@@ -328,7 +328,7 @@ When hosted, that `request_info` is surfaced to the caller as a **function call*
    azd ai agent invoke "Plan a 5-day Tokyo trip for two with a budget of €3000."
    ```
 
-   `azd deploy` packages `travel_assistant/`, builds the container image, pushes it, and rolls out a new hosted agent version. The whole workflow deploys **inside** the single container, so nothing else is needed — no role grant, no `azd provision`.
+   `azd deploy` uploads `travel_assistant/` as source, and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version. The whole workflow runs within this single hosted agent, so nothing else is needed — no role grant, no container registry, no `azd provision`.
 
 ## Try it
 

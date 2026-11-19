@@ -224,7 +224,7 @@ Metadata-only: in the `travel-buddy` service of the repo-root `azure.yaml`, upda
    azd ai agent invoke "Help me plan a 5-day Tokyo trip: flights from Lisbon, a hotel near Shibuya under €200/night, and a day-trip suggestion."
    ```
 
-   `azd deploy` builds the container image from `travel_assistant/` — now including `coordinator.py` and your new `main.py` — pushes it, and rolls out a new hosted agent version. The whole group chat deploys **inside** the single container, so nothing else is needed — no role grant, no `azd provision`.
+   `azd deploy` uploads `travel_assistant/` as source — now including `coordinator.py` and your new `main.py` — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version. The whole group chat runs within this single hosted agent, so nothing else is needed — no role grant, no container registry, no `azd provision`.
 
 ## Try it
 

@@ -197,7 +197,7 @@ Each `${VAR}` is resolved from your **azd environment** (`.azure/<env-name>/.env
    azd deploy
    ```
 
-   This builds the container image from `travel_assistant/` — now including the MCP tool registration — stores it to your Azure Container Registry, and rolls out a new hosted agent version that receives the two MCP env vars from `azure.yaml`. No `azd provision` is needed because the infrastructure is unchanged.
+   `azd` uploads `travel_assistant/` as source — now including the MCP tool registration — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version with the two MCP env vars from `azure.yaml`. No container registry or `azd provision` is needed.
 
 5. **Invoke the deployed agent**:
 

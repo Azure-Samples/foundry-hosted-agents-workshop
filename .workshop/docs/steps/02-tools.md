@@ -243,7 +243,7 @@ The tools themselves are registered in code via `tools=[...]` in `main.py` — `
    azd deploy
    ```
 
-   This builds the container image from `travel_assistant/` — now including `tools.py` and your updated `main.py` — stores it to your Azure Container Registry, and rolls out a new hosted agent version. No `azd provision` is needed because the infrastructure is unchanged.
+   `azd` uploads `travel_assistant/` as source — now including `tools.py` and your updated `main.py` — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version. No container registry or `azd provision` is needed.
 
 4. **Invoke the deployed agent**:
 

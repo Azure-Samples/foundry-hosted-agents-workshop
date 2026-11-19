@@ -13,9 +13,9 @@ Both skills are served by a **single** `SkillsProvider.from_paths([local, downlo
 
 Four sibling folders plus a shared `.env` (same shape as after advancing to Step 6):
 
-- `travel_assistant/` — the agent. Adds `skills/travel-guide/` (local) and a small startup download in `main.py` that fetches the Foundry skill into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) before serving both via one `SkillsProvider`. This is what `azd deploy` packages into the container; `azure.yaml` (copy it to your repo root) now also passes `SKILL_NAMES`.
+- `travel_assistant/` — the agent. Adds `skills/travel-guide/` (local) and a small startup download in `main.py` that fetches the Foundry skill into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) before serving both via one `SkillsProvider`. This is what `azd deploy` uploads as source for the managed Python runtime; `azure.yaml` (copy it to your repo root) now also passes `SKILL_NAMES`.
 - `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` (from Step 5).
-- `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/`. Never deployed — like `travel_indexer/`, it sits outside `travel_assistant/`, the only folder `azd deploy` packages.
+- `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/`. Never deployed — like `travel_indexer/`, it sits outside `travel_assistant/`, the only folder `azd deploy` uploads.
 - `travel_toolbox/` — the toolbox definition (`toolbox.yaml`), a sibling of `travel_assistant/`.
 - `azure.yaml` — the azd project file (copy it to your repo root); its `env` map passes `SKILL_NAMES`.
 - `.env.example` — shared configuration, including `SKILL_NAMES`.
