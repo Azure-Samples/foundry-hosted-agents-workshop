@@ -9,15 +9,15 @@
 - What the built-in **Web Search** and **Code Interpreter** tools give the agent
 - Why moving the flights MCP *into* the toolbox makes it reusable and centrally managed
 - How `FoundryToolbox(credential)` connects to the toolbox through a single `TOOLBOX_ENDPOINT`
-- Why the toolbox is created **out-of-band**, so your deployment shape doesn't change (still `resources: []`, no `azd provision`)
+- Why the toolbox is created **out-of-band**, so your deployment shape doesn't change (no new azd-managed resources, no `azd provision`)
 
 ## What's already in the repo
 
-- `travel_assistant/main.py`, `travel_assistant/tools.py`, `agent.yaml`, `agent.manifest.yaml` — carried over from Step 3 (your TravelBuddy agent with the three function tools **and** the directly-wired OctoTrip flights MCP). Nothing was deleted when you advanced.
+- `travel_assistant/main.py`, `travel_assistant/tools.py`, and the repo-root `azure.yaml` — carried over from Step 3 (your TravelBuddy agent with the three function tools **and** the directly-wired OctoTrip flights MCP). Nothing was deleted when you advanced.
 - `travel_assistant/data/itinerary.csv` — a small sample itinerary (mixed currencies on purpose) for Code Interpreter to analyze. It was delivered when you advanced.
 - `travel_toolbox/toolbox.yaml` — a starter toolbox definition at the **repo root** (a sibling of `travel_assistant/`, delivered when you advanced). Step 1 walks through it.
 
-In this step you make **delta-only** edits: create the toolbox from `toolbox.yaml`, set **one** new environment variable (`TOOLBOX_ENDPOINT`), swap the direct `client.get_mcp_tool(...)` line in `main.py` for `FoundryToolbox(credential)`, and update `agent.yaml` + the manifest metadata. You keep your carried-over instructions and function tools — you only adjust what the toolbox changes.
+In this step you make **delta-only** edits: create the toolbox from `toolbox.yaml`, set **one** new environment variable (`TOOLBOX_ENDPOINT`), swap the direct `client.get_mcp_tool(...)` line in `main.py` for `FoundryToolbox(credential)`, and update `azure.yaml` (metadata plus the `env` swap). You keep your carried-over instructions and function tools — you only adjust what the toolbox changes.
 
 ## Concept (5-min read)
 
@@ -32,9 +32,9 @@ Here's the contrast across all three:
 | Where it's defined | Python in your app | `client.get_mcp_tool(...)` in code | `toolbox.yaml`, created in the project |
 | Who manages it | You | You (per agent) | The Foundry project |
 | Reuse across agents | Copy the code | Re-wire per agent | Share one toolbox endpoint |
-| Config lives in | Your source | Each agent's `.env` + manifest | The toolbox (one place) |
+| Config lives in | Your source | Each agent's `.env` + `azure.yaml` | The toolbox (one place) |
 | Registered in code as | `tools=[fn, ...]` | `client.get_mcp_tool(...)` | `FoundryToolbox(credential)` |
-| Deployment impact | None | None (`resources: []`) | None (`resources: []`, created out-of-band) |
+| Deployment impact | None | None (`env` entries only) | None (one `env` entry; created out-of-band) |
 
 This step migrates the **flights MCP from Step 3 into the toolbox**, and adds two Foundry-managed capabilities alongside it:
 
@@ -100,25 +100,23 @@ tools:
 - The **`mcp`** entry is the OctoTrip flights server **migrated in from Step 3**. Because it's public and anonymous, you give it a `server_label` and `server_url` and nothing else. (A tool that needs auth would instead reference a `project_connection_id` — a named connection stored in the project.)
 - `require_approval: "never"` lets the runtime call each tool automatically without pausing for human approval — appropriate for these read-only, public capabilities.
 
-> **Why does this file live at the repo root, not in `travel_assistant/`?** `azd ai agent init` snapshots the **`travel_assistant/` folder** into the deployable project. The toolbox is created separately (Step 2) and referenced only by endpoint, so its definition must sit **outside** the agent folder — otherwise it would be needlessly copied into the agent image. Keeping `travel_toolbox/` a sibling of `travel_assistant/` keeps the two concerns separate.
+> **Why does this file live at the repo root, not in `travel_assistant/`?** `azd` uploads **only the `travel_assistant/` folder** (the `project:` of the `travel-buddy` service in `azure.yaml`) as the agent's source package. The toolbox is created separately (Step 2) and referenced only by endpoint, so its definition must sit **outside** the agent folder — otherwise it would be needlessly copied into the agent package. Keeping `travel_toolbox/` a sibling of `travel_assistant/` keeps the two concerns separate.
 
 ### 2. Create the toolbox in your Foundry project
 
 Creating the toolbox is a one-time setup that produces the endpoint your agent connects to. Two things matter for the command to succeed:
 
 - **Load your repo-root `.env`** so `WORKSHOP_RESOURCE_PREFIX` expands into the toolbox name.
-- **Run it from inside the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder** that Step 1 generated. `azd ai toolbox create` needs a **current azd environment** — the one Step 1 created at `.azure/<env-name>/` inside that folder. Run it from the repo root and it fails with `failed to read current azd environment: … no project exists` even though the project endpoint resolves. (`azd ai project set` alone does **not** satisfy this — azd still needs an environment in the working directory.)
+- **Run it from the repo root**, where `azure.yaml` lives. `azd ai toolbox create` needs a **current azd environment** — the one you created with `azd env new` in Step 1 (stored under `.azure/<env-name>/` at the repo root). Run it from another folder and it fails with `failed to read current azd environment: … no project exists` even though the project endpoint resolves. (`azd ai project set` alone does **not** satisfy this — azd still needs an environment for the working directory.)
 
-The `toolbox.yaml` stays at the repo root, so from inside the project folder you reference it as `../travel_toolbox/toolbox.yaml`. Sign in, load `.env`, `cd` into the folder, then create the toolbox:
+Sign in, load `.env`, then create the toolbox from `travel_toolbox/toolbox.yaml`:
 
 <!-- terminal -->
 ```bash
 # bash / zsh — run from the repo root
 set -a; source .env; set +a
-cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"   # the azd project folder from Step 1 (holds the azd env)
 azd ai toolbox create "${WORKSHOP_RESOURCE_PREFIX}-travel-toolbox" \
-  --from-file ../travel_toolbox/toolbox.yaml
-cd ..                                           # back to the repo root
+  --from-file travel_toolbox/toolbox.yaml
 ```
 
 <!-- terminal -->
@@ -128,10 +126,8 @@ Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
   $name, $value = $_ -split '=', 2
   Set-Item "Env:$($name.Trim())" $value.Trim()
 }
-cd "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"   # the azd project folder from Step 1 (holds the azd env)
 azd ai toolbox create "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-toolbox" `
-  --from-file ../travel_toolbox/toolbox.yaml
-cd ..                                                # back to the repo root
+  --from-file travel_toolbox/toolbox.yaml
 ```
 
 The command prints a **versioned MCP endpoint**, shaped like:
@@ -147,7 +143,7 @@ Copy that endpoint and record it as the **one new** variable this step introduce
 TOOLBOX_ENDPOINT=https://<account>.services.ai.azure.com/api/projects/<project>/toolboxes/<toolbox-name>/versions/<version>/mcp?api-version=v1
 ```
 
-> Lost the endpoint later? Retrieve it any time — **from inside the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` folder** (the `azd` commands need its environment) — with `azd ai toolbox show "${WORKSHOP_RESOURCE_PREFIX}-travel-toolbox" --output json`, or read it from the **Toolboxes** view in the Foundry portal / VS Code Toolkit. You no longer need `MCP_SERVER_LABEL` / `MCP_SERVER_URL` in `.env` — the flights server now lives inside the toolbox.
+> Lost the endpoint later? Retrieve it any time — **from the repo root** (the `azd` commands need its environment) — with `azd ai toolbox show "${WORKSHOP_RESOURCE_PREFIX}-travel-toolbox" --output json`, or read it from the **Toolboxes** view in the Foundry portal / VS Code Toolkit. You no longer need `MCP_SERVER_LABEL` / `MCP_SERVER_URL` in `.env` — the flights server now lives inside the toolbox.
 
 Once the toolbox is deployed, you can also see it in the **Foundry Toolkit** for VS Code: expand your project under **My Resources → Tools** and open the **Toolboxes** tab to view your toolbox along with its **Endpoint URL**.
 
@@ -225,90 +221,47 @@ That's the whole code change. Everything else — the `FoundryChatClient` setup,
 
 > **Why one `credential`?** The toolbox and the chat client both authenticate to Foundry. Sharing a single `DefaultAzureCredential()` avoids two sign-in flows and keeps token caching in one place.
 
-### 4. Update `travel_assistant/agent.yaml`
+### 4. Update the agent's metadata and `env` in `azure.yaml`
 
-`agent.yaml` carries its own environment-variable list for the **local** run (`azd ai agent run`). The flights MCP is no longer wired in code, so remove its two variables and add `TOOLBOX_ENDPOINT`:
-
-```yaml
-# travel_assistant/agent.yaml
-environment_variables:
-  # ... AZURE_AI_PROJECT_ENDPOINT, AZURE_AI_MODEL_DEPLOYMENT_NAME, WORKSHOP_RESOURCE_PREFIX ...
-  - name: TOOLBOX_ENDPOINT          # <-- added
-    value: ${TOOLBOX_ENDPOINT}
-  # remove the Step 3 MCP_SERVER_LABEL / MCP_SERVER_URL entries — the flights
-  # server now lives inside the toolbox
-```
-
-Leave the `name`, `kind`, `protocols`, and CPU/memory blocks exactly as they were.
-
-### 5. Update `travel_assistant/agent.manifest.yaml`
-
-The toolbox is created **out-of-band** and referenced only by endpoint, so the manifest structure barely changes — same `template`, same `protocols`, and `resources` stays empty (`[]`) because **no new Azure resource is declared**. You make two kinds of edit: **metadata** (update the `description`, add a `Toolbox Tools` tag, swap the MCP `tool_declarations` entry for a toolbox one) and **configuration** (swap the MCP environment variables for `TOOLBOX_ENDPOINT`).
-
-Update the `description`:
+The toolbox is created **out-of-band** and referenced only by endpoint, so the hosted-agent shape barely changes — same container, same `protocols`, and **no new azd-managed Azure resource**. You make two kinds of edit to the `travel-buddy` service in the repo-root `azure.yaml`: **metadata** (update the `description` and add a `Toolbox Tools` tag — keep `MCP Tools`, since the toolbox still carries an MCP server) and **configuration** (remove the Step 3 `MCP_SERVER_LABEL` / `MCP_SERVER_URL` entries from the `env` map and add `TOOLBOX_ENDPOINT`):
 
 ```yaml
-# travel_assistant/agent.manifest.yaml
-description: >
-  TravelBuddy is an Agent Framework hosted agent with local Python function tools
-  for weather, local time, and currency, plus a Foundry Toolbox that bundles web
-  search, Code Interpreter, and the OctoTrip flights MCP server behind one
-  project-managed endpoint.
+# azure.yaml — under services: travel-buddy:
+    description: TravelBuddy with local function tools plus a Foundry Toolbox that bundles web search, Code Interpreter, and the OctoTrip Flights MCP server.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+        - Function Tools
+        - MCP Tools
+        - Toolbox Tools          # <-- added
+    # ... protocols unchanged ...
+    env:
+      PYTHONNOUSERSITE: "1"
+      AZURE_AI_PROJECT_ENDPOINT: ${FOUNDRY_PROJECT_ENDPOINT}
+      AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+      WORKSHOP_RESOURCE_PREFIX: ${WORKSHOP_RESOURCE_PREFIX}
+      TOOLBOX_ENDPOINT: ${TOOLBOX_ENDPOINT}   # <-- added
+      # removed: MCP_SERVER_LABEL and MCP_SERVER_URL — the flights server now
+      # lives inside the toolbox
 ```
 
-Add the `Toolbox Tools` tag (keep the rest, including `Travel Assistant` and `MCP Tools` — the toolbox still carries an MCP server) and replace the Step 3 `octotrip-flights` MCP entry with a toolbox entry (keep the three function-tool entries):
-
-```yaml
-metadata:
-  tags:
-    - Agent Framework
-    - AI Agent Hosting
-    - Azure AI AgentServer
-    - Responses Protocol
-    - Travel Assistant
-    - Function Tools
-    - MCP Tools
-    - Toolbox Tools          # <-- added
-  tool_declarations:
-    # ... keep the get_weather / get_local_time / convert_currency entries ...
-    - name: travel-toolbox                       # <-- replaces the octotrip-flights mcp entry
-      description: >
-        Foundry Toolbox bundling web_search, code_interpreter, and the OctoTrip
-        flights MCP server, consumed from one project-managed endpoint.
-      type: toolbox
-      endpoint: ${TOOLBOX_ENDPOINT}
-```
-
-Then swap the MCP variables for `TOOLBOX_ENDPOINT` in the **existing** `template.environment_variables` list (keep the Step 1/Step 2 entries):
-
-```yaml
-template:
-  # ... name, kind, protocols unchanged ...
-  environment_variables:
-    # ... AZURE_AI_PROJECT_ENDPOINT, AZURE_AI_MODEL_DEPLOYMENT_NAME, WORKSHOP_RESOURCE_PREFIX ...
-    - name: TOOLBOX_ENDPOINT         # <-- added
-      value: ${TOOLBOX_ENDPOINT}
-    # remove the Step 3 MCP_SERVER_LABEL / MCP_SERVER_URL entries
-
-resources: []                        # <-- unchanged: the toolbox is created out-of-band
-```
-
-`tool_declarations` is **descriptive metadata** — it documents the agent's capabilities for humans and tooling that browse the manifest. The toolbox is connected in code via `FoundryToolbox(credential)`; the toolbox itself decides which concrete tools it exposes. `resources` stays `[]` because the toolbox is a project-level resource you created separately — the manifest declares no new Azure resource, so there's nothing to provision.
+The toolbox is connected in code via `FoundryToolbox(credential)`, and the toolbox itself decides which concrete tools it exposes — `azure.yaml` describes how the agent is hosted, not what it can do. The toolbox is a project-level resource you created separately with `azd ai toolbox create`, so `azure.yaml` gains only an `env` entry and there's nothing new to provision. Leave the rest of the file (`name`, `container`, …) exactly as it was in Step 3.
 
 ## Run and deploy TravelBuddy
 
-**Do you need to re-init? Yes.** In earlier steps, `azd ai agent init` **copied** your `travel_assistant/` code into the generated `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder — that copy is the snapshot azd actually builds and deploys. Your Step 4 edits (the `main.py` toolbox swap and the manifest/`agent.yaml` changes) live in `travel_assistant/`, so the copied snapshot is now **stale**. Re-run `azd ai agent init` to refresh it before you run or deploy.
+**Your code changes need no extra setup.** `azd` packages `travel_assistant/` straight from your working tree on every `azd ai agent run` and `azd deploy`, so your `main.py` toolbox swap is picked up automatically. **No `azd provision` either** — you added no new azd-managed Azure resource (the toolbox was created out-of-band in Step 2 above), so the infrastructure from earlier steps is unchanged. The only new setup is copying `TOOLBOX_ENDPOINT` into the azd environment. Run every command from the **repo root**.
 
-**Do you need `azd provision`? No.** You added no new Azure resource to the manifest (`resources:` is still `[]`) — the toolbox was created out-of-band in Step 2. The infrastructure from earlier steps is unchanged.
-
-1. **Re-init from the repository root.** Load your `.env` into the shell first — the repo `.env` isn't auto-loaded, and the shell needs `WORKSHOP_RESOURCE_PREFIX` to expand `--agent-name` (and to `cd` into the folder later):
+1. **Add the new value to the azd env.** azd keeps its **own** environment store (`.azure/<env-name>/.env`), separate from the repo `.env`. The Foundry values are already in the azd env from Step 1, so you only need to set the **one new** `TOOLBOX_ENDPOINT`. Load your `.env` into the shell first (the repo `.env` isn't auto-loaded), then pass the value through:
 
    <!-- terminal -->
    ```bash
    # bash / zsh
    set -a; source .env; set +a
-   azd ai agent init -m travel_assistant/agent.manifest.yaml \
-     --agent-name "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+   azd env set TOOLBOX_ENDPOINT "$TOOLBOX_ENDPOINT"
    ```
 
    <!-- terminal -->
@@ -318,38 +271,19 @@ resources: []                        # <-- unchanged: the toolbox is created out
      $name, $value = $_ -split '=', 2
      Set-Item "Env:$($name.Trim())" $value.Trim()
    }
-   azd ai agent init -m travel_assistant/agent.manifest.yaml `
-     --agent-name "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   ```
-
-   This refreshes the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` folder with your updated `main.py` and manifest metadata (including the new `TOOLBOX_ENDPOINT` variable).
-
-2. **`cd` into the project folder and add the new value to the azd env.** azd keeps its **own** environment store (`.azure/<env-name>/.env`), separate from the repo `.env`. The Foundry values are already in the azd env from earlier steps, so you only need to set the **one new** `TOOLBOX_ENDPOINT`. Keep `.env` loaded in the shell so you can pass the value through:
-
-   <!-- terminal -->
-   ```bash
-   # bash / zsh — after: set -a; source .env; set +a
-   cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   azd env set TOOLBOX_ENDPOINT "$TOOLBOX_ENDPOINT"
-   ```
-
-   <!-- terminal -->
-   ```powershell
-   # PowerShell — after loading .env into the shell
-   cd "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
    azd env set TOOLBOX_ENDPOINT "$env:TOOLBOX_ENDPOINT"
    ```
 
-3. **Run TravelBuddy locally** in the hosted Responses runtime:
+2. **Run TravelBuddy locally** in the hosted Responses runtime:
 
    <!-- terminal -->
    ```bash
    azd ai agent run
    ```
 
-   `azd` reads `agent.yaml`, substitutes values from your azd environment, and starts the server on `http://localhost:8088` — now with your three function tools **and** the Foundry Toolbox (web search, Code Interpreter, flights) loaded. Leave this terminal running.
+   `azd` reads the `travel-buddy` service in `azure.yaml`, resolves its `env` from your azd environment, and starts the server on `http://localhost:8088` — now with your three function tools **and** the Foundry Toolbox (web search, Code Interpreter, flights) loaded. Leave this terminal running.
 
-4. **Invoke the local agent from a second terminal.** Open a **new** terminal (in the same project folder) and ask a question that uses the toolbox:
+3. **Invoke the local agent from a second terminal.** Open a **new** terminal (also at the repo root) and ask a question that uses the toolbox:
 
    <!-- terminal -->
    ```bash
@@ -360,16 +294,16 @@ resources: []                        # <-- unchanged: the toolbox is created out
 
    Prefer a UI? With the local agent still running, open the **Agent Inspector** from the Foundry Toolkit (Command Palette → **Foundry Toolkit: Open Agent Inspector**). It connects to `http://localhost:8088` and shows each streamed toolbox call and result — and lets you **attach `itinerary.csv`** to a message for Code Interpreter.
 
-5. **Deploy to Foundry**:
+4. **Deploy to Foundry**:
 
    <!-- terminal -->
    ```bash
    azd deploy
    ```
 
-   This builds the container image from the **refreshed** project-folder snapshot — now consuming the toolbox — pushes it to your Azure Container Registry, and rolls out a new hosted agent version. No `azd provision` is needed because the infrastructure is unchanged.
+   `azd` uploads `travel_assistant/` as source — now consuming the toolbox — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version. No container registry or `azd provision` is needed.
 
-6. **Invoke the deployed agent**:
+5. **Invoke the deployed agent**:
 
    <!-- terminal -->
    ```bash
@@ -391,28 +325,24 @@ When you ask a budget prompt, remember to attach the itinerary file reference. W
 
 ### `azd ai toolbox create` fails with "no project exists"
 
-If the create command exits with `ERROR: failed to read current azd environment: … no project exists; to create a new project, run 'azd init'`, you ran it from the **repo root**, which has no `azd` environment. Setting the project with `azd ai project set` isn't enough — `azd ai toolbox` commands still need a current azd environment in the working directory. Use the one Step 1 created inside the agent project folder:
+If the create command exits with `ERROR: failed to read current azd environment: … no project exists; to create a new project, run 'azd init'`, azd couldn't find an environment for your working directory. Setting the project with `azd ai project set` isn't enough — `azd ai toolbox` commands still need a current azd environment. Make sure you're at the **repo root** (where `azure.yaml` lives) and retry:
 
 <!-- terminal -->
 ```bash
 set -a; source .env; set +a
-cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
 azd ai toolbox create "${WORKSHOP_RESOURCE_PREFIX}-travel-toolbox" \
-  --from-file ../travel_toolbox/toolbox.yaml
-cd ..
+  --from-file travel_toolbox/toolbox.yaml
 ```
 
-If the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` folder doesn't exist yet, run the Step 1 `azd ai agent init` first — that's what creates the azd environment.
+If it still fails, you haven't created the azd environment yet — run the Step 1 one-time setup (`azd env new`, `azd ai project add`, …) from the repo root first.
 
 ### Toolbox endpoint or auth error
 
-Most toolbox failures are a missing or wrong `TOOLBOX_ENDPOINT`, or a stale sign-in. Confirm the value and that you're signed in (run the `show` from **inside** the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` folder so `azd` finds its environment):
+Most toolbox failures are a missing or wrong `TOOLBOX_ENDPOINT`, or a stale sign-in. Confirm the value and that you're signed in (run the `show` from the **repo root** so `azd` finds its environment):
 
 <!-- terminal -->
 ```bash
-cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
 azd ai toolbox show "${WORKSHOP_RESOURCE_PREFIX}-travel-toolbox" --output json
-cd ..
 ```
 
 Make sure the endpoint in `.env` (and in the azd env, via `azd env set TOOLBOX_ENDPOINT ...`) matches the versioned URL the toolbox reports. `FoundryToolbox(credential)` authenticates with `DefaultAzureCredential`, so `az login` (or a valid managed identity when deployed) must resolve.
@@ -449,7 +379,7 @@ For the workshop, it's enough if the response names the chart file.
 
 ### The flights tool disappeared
 
-Flight search now lives **inside** the toolbox, not in `main.py`. If flights stop working, confirm `travel_toolbox/toolbox.yaml` still has the `mcp` entry with the OctoTrip `server_url`, and that you created the toolbox from that file. If you edited `toolbox.yaml` after creating the toolbox, re-run `azd ai toolbox create` from inside the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` folder (it publishes a new version) and update `TOOLBOX_ENDPOINT`.
+Flight search now lives **inside** the toolbox, not in `main.py`. If flights stop working, confirm `travel_toolbox/toolbox.yaml` still has the `mcp` entry with the OctoTrip `server_url`, and that you created the toolbox from that file. If you edited `toolbox.yaml` after creating the toolbox, re-run `azd ai toolbox create` from the repo root (it publishes a new version) and update `TOOLBOX_ENDPOINT`.
 
 ### The local function tools stopped working
 
@@ -457,7 +387,7 @@ The final `tools` list should contain **four** entries: the three function tools
 
 ### Deploy didn't pick up my change
 
-`azd ai agent init` **copied** your code into the `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder, so edits in `travel_assistant/` don't deploy on their own. Re-run `azd ai agent init` (step 1 above) to refresh that snapshot — or copy your edited files into the folder's code directory — then `azd deploy` again.
+Make sure you ran `azd env set TOOLBOX_ENDPOINT ...` (step 1 above), that `TOOLBOX_ENDPOINT` has an entry in the `env` map of the `travel-buddy` service in `azure.yaml`, and then run `azd deploy` again from the repo root (where `azure.yaml` lives).
 
 ## Solution
 

@@ -99,13 +99,13 @@ MCP_SERVER_URL=https://<generated-id>-8931.<region>.devtunnels.ms/mcp
 ```
 
 ```bash
-cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+# from the repo root
 azd env set MCP_SERVER_URL "$MCP_SERVER_URL"
 ```
 
 `azd` reads its own environment, not the repo's `.env`, so skipping the
 `azd env set` leaves your agent calling the real OctoTrip server. Step 3 already
-wired both names into `agent.manifest.yaml` under `template.environment_variables`,
+wired both names into the `env` map of the repo-root `azure.yaml`,
 so nothing to change there — just restart `azd ai agent run` (or redeploy) so the
 agent picks up the new URL.
 

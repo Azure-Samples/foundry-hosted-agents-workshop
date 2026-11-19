@@ -1,3 +1,9 @@
-agent.manifest.yaml
-agent.yaml
 .env.example
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.env.*

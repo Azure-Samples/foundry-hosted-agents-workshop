@@ -4,6 +4,8 @@
 
 Adds mock get_weather, get_local_time, and convert_currency functions.
 
+Files sit flat here; in your repo they live in `travel_assistant/`, except `azure.yaml`, which belongs at the repo root (with `project: travel_assistant`).
+
 ## Run it
 
 1. Copy `.env.example` to `.env` and fill in values.

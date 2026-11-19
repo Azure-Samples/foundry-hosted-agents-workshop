@@ -6,11 +6,12 @@ Builds on Step 6: keeps every carried capability (function tools, Foundry Toolbo
 
 ## Layout
 
-- `travel_assistant/` — the agent code. `coordinator.py` builds the group chat and each specialist gets a sliced capability set; the Activities specialist downloads the Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider` (the group chat manager returns structured output, so a skill it carried wouldn't reliably fire — the skills ride on the Activities specialist). `agents/{flights,hotels,activities}/` hold per-specialist `agent.yaml` + `agent.manifest.yaml` slices that document each role's tool/RAG/skill boundary. Snapshotted by `azd ai agent init`.
+- `travel_assistant/` — the agent code. `coordinator.py` builds the group chat and each specialist gets a sliced capability set; the Activities specialist downloads the Foundry skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) and serves it plus the local skill via one `SkillsProvider` (the group chat manager returns structured output, so a skill it carried wouldn't reliably fire — the skills ride on the Activities specialist). `agents/{flights,hotels,activities}/specialist.yaml` cards document each role's instructions and tool/RAG/skill boundary (reference only — not azd files). Uploaded as source by `azd deploy`.
 - `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` (from Step 5).
-- `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/` (from Step 6). Never deployed — `azd ai agent init` snapshots only `travel_assistant/`.
+- `foundry_skills/` — the out-of-band Foundry-skill authoring + upload (`provision_skills.py`, `skills/response-guardrails/SKILL.md`), a sibling of `travel_assistant/` (from Step 6). Never deployed — `azd deploy` uploads only `travel_assistant/`.
 - `travel_toolbox/` — the toolbox definition (`toolbox.yaml`).
-- `.env.example` — shared configuration, including `FOUNDRY_SKILL_NAMES`.
+- `azure.yaml` — the azd project file (copy it to your repo root); its `env` map passes `SKILL_NAMES`.
+- `.env.example` — shared configuration, including `SKILL_NAMES`.
 
 ## Capability slices
 
@@ -23,7 +24,7 @@ Builds on Step 6: keeps every carried capability (function tools, Foundry Toolbo
 
 ## Run it
 
-1. Copy `.env.example` to `.env` and fill in values (including `FOUNDRY_SKILL_NAMES`).
+1. Copy `.env.example` to `.env` and fill in values (including `SKILL_NAMES`).
 2. Sign in with Entra ID: `az login`. Uploading and downloading Foundry skills needs **Foundry User** (formerly Azure AI User) on the Foundry project, and the account must allow **public network access** (the Skills API does not support private networking).
 3. Install dependencies: `pip install -r travel_assistant/requirements.txt`.
 4. Provision the destinations index once (from Step 5): `python travel_indexer/provision_index.py`.

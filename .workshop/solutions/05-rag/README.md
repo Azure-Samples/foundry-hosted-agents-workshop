@@ -8,9 +8,10 @@ Builds on Step 4: keeps the function tools (`get_weather`, `get_local_time`, `co
 
 This solution mirrors the repo layout after advancing to Step 5 — three sibling folders plus a shared `.env`:
 
-- `travel_assistant/` — the agent (`main.py`, `tools.py`, `agent.yaml`, `agent.manifest.yaml`, `requirements.txt`, `Dockerfile`, `data/itinerary.csv`). This is what `azd ai agent init` snapshots.
-- `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` so the provisioning script and corpus are never swept into the deployed agent snapshot.
-- `travel_toolbox/` — the toolbox definition (`toolbox.yaml`), a sibling of `travel_assistant/` so it is never swept into the agent snapshot.
+- `azure.yaml` — the azd project file (copy it to your repo root). Its `travel-buddy` service points at `travel_assistant/` and now also passes `AZURE_AI_SEARCH_ENDPOINT` and `AZURE_AI_SEARCH_INDEX_NAME`.
+- `travel_assistant/` — the agent (`main.py`, `tools.py`, `requirements.txt`, `data/itinerary.csv`). This is what `azd deploy` uploads as source for the managed Python runtime.
+- `travel_indexer/` — the out-of-band Search indexer (`provision_index.py`, `data/destinations.json`), a sibling of `travel_assistant/` so the provisioning script and corpus are never included in the agent source package.
+- `travel_toolbox/` — the toolbox definition (`toolbox.yaml`), a sibling of `travel_assistant/` so it is never included in the agent source package.
 - `.env.example` — shared configuration, a sibling of all three folders.
 
 ## Run it
@@ -27,7 +28,7 @@ To prove retrieval actually ran, ask `What is TravelBuddy's internal concierge d
 
 Your Entra ID needs **`Search Service Contributor`** (create the index) and **`Search Index Data Contributor`** (upload/query) on the Search resource to run `provision_index.py`.
 
-When you **deploy** to Foundry, the agent no longer queries as your user — its `AzureAISearchContextProvider` uses `DefaultAzureCredential`, which inside the container resolves the agent's **instance identity** (a per-agent Microsoft Entra service principal). Grant *that* identity the least-privilege **`Search Index Data Reader`** role on the Search service (not a broader `Data Contributor`), or the deployed agent returns `Forbidden`. Resolve the identity from the agent (post-deploy), then assign:
+When you **deploy** to Foundry, the agent no longer queries as your user — its `AzureAISearchContextProvider` uses `DefaultAzureCredential`, which inside the managed runtime resolves the agent's **instance identity** (a per-agent Microsoft Entra service principal). Grant *that* identity the least-privilege **`Search Index Data Reader`** role on the Search service (not a broader `Data Contributor`), or the deployed agent returns `Forbidden`. Resolve the identity from the agent (post-deploy), then assign:
 
 ```bash
 AGENT_NAME="${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"   # AZURE_AI_PROJECT_ENDPOINT is already in your .env
@@ -38,7 +39,7 @@ az role assignment create --assignee-object-id "$AGENT_IDENTITY" \
   --scope "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Search/searchServices/<search-name>"
 ```
 
-This grant is **one-time per agent** and survives `azd deploy` redeploys (the instance identity belongs to the agent, not the version). Re-grant only if you delete/recreate or **publish** the agent (publishing creates a distinct identity — prior roles don't carry over). The project managed identity handles *platform* ops (model proxy, ACR pull, Log Analytics), not your code's Search calls. A managed **Foundry IQ** knowledge base is the exception — Foundry retrieves as the project MI. See [manage-hosted-agent](https://learn.microsoft.com/azure/foundry/agents/how-to/manage-hosted-agent#retrieve-the-agent-identity-for-role-assignments), [agent-identity](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-identity), and [foundry-iq-connect#prerequisites](https://learn.microsoft.com/azure/foundry/agents/how-to/foundry-iq-connect#prerequisites).
+This grant is **one-time per agent** and survives `azd deploy` redeploys (the instance identity belongs to the agent, not the version). Re-grant only if you delete/recreate or **publish** the agent (publishing creates a distinct identity — prior roles don't carry over). Your hosted agent code uses the agent instance identity for its Search calls. A managed **Foundry IQ** knowledge base is the exception — Foundry retrieves as the project MI. See [manage-hosted-agent](https://learn.microsoft.com/azure/foundry/agents/how-to/manage-hosted-agent#retrieve-the-agent-identity-for-role-assignments), [agent-identity](https://learn.microsoft.com/azure/foundry/agents/concepts/agent-identity), and [foundry-iq-connect#prerequisites](https://learn.microsoft.com/azure/foundry/agents/how-to/foundry-iq-connect#prerequisites).
 
 Back to workshop: [../../README.md](../../README.md)
 

@@ -9,16 +9,16 @@
 - The Agent Framework's native multi-agent primitives — `SequentialBuilder`, `ConcurrentBuilder`, `HandoffBuilder`, and `GroupChatBuilder`
 - When a **manager-led group chat** fits: a coordinator LLM chooses the next expert each round and decides when the plan is done
 - How to give each agent a narrow capability slice from the carried stack (tools, toolbox, RAG, skills)
-- How `workflow.as_agent()` exposes the whole graph as one hosted agent, so deployment is unchanged (`resources: []`, no `azd provision`)
+- How `workflow.as_agent()` exposes the whole graph as one hosted agent, so deployment is unchanged (no new azd-managed resource, no `azd provision`)
 
 ## What's already in the repo
 
 - Everything from Steps 1–6 in `travel_assistant/` — the three function tools, the Foundry Toolbox, the Step 5 RAG provider, and the Step 6 itinerary skill. Nothing was deleted when you advanced.
 - `travel_toolbox/toolbox.yaml` — the toolbox definition, still a sibling of `travel_assistant/`.
-- `travel_assistant/agents/{flights,hotels,activities}/` — the per-specialist config slices (`agent.yaml` + `agent.manifest.yaml`), delivered complete when you advanced. You **read** these; you don't edit them.
+- `travel_assistant/agents/{flights,hotels,activities}/specialist.yaml` — one reference card per specialist (its identity, instructions, and capability slice), delivered complete when you advanced. You **read** these; you don't edit them.
 - `travel_assistant/coordinator.py` — the group chat, delivered **almost complete**: the instruction constants, the Step 5 RAG provider, the Step 6 skills provider and trusted script runner, the manager `Coordinator`, the `FlightsSpecialist` worked example, and the `GroupChatBuilder` graph are all wired for you. One `TODO` is left — adding the Hotels and Activities specialists.
 
-In this step you make **delta-only** edits: read the per-specialist config slices under `agents/`, fill in the single `TODO` in `coordinator.py` (the two remaining specialists), and point `main.py` at the Coordinator. There are **no** new environment variables and no manifest env changes — only a `Multi-Agent` tag and a `group_chat` metadata block.
+In this step you make **delta-only** edits: read the per-specialist `specialist.yaml` cards under `agents/`, fill in the single `TODO` in `coordinator.py` (the two remaining specialists), and point `main.py` at the Coordinator. There are **no** new environment variables and no `env` changes in `azure.yaml` — only a new `description` and a `Multi-Agent` tag.
 
 ## Concept (5-min read)
 
@@ -52,7 +52,7 @@ graph TD
     Activities -. toolbox web + RAG + travel-guide + guardrails skills .-> AT[ ]
 ```
 
-**One hosted agent, or many? (in-process vs. A2A).** Notice all four agents live in the *same* process and share one `FoundryChatClient`; `workflow.as_agent()` then wraps the whole graph as a **single** hosted agent — so deployment is unchanged (`resources: []`, no `azd provision`). The manager's speaker selections and the participant runs are in-memory calls: fast, simple, and easy to trace. The alternative is to deploy each specialist as its **own** hosted agent and have the Coordinator reach them remotely over the **A2A (Agent-to-Agent) protocol** (or expose one deployed agent as a function tool of another). Remote agents can be scaled, versioned, owned, and reused independently — even across teams, languages, or vendors — but every round now pays a network hop plus auth and serialization cost, and you operate N deployments instead of one. Rule of thumb: keep chatty, tightly-coupled specialists **in-process** (what we do here); reach for **A2A** only when a specialist genuinely needs to be independently deployed or reused. The two compose — a hosted agent like this one can itself be a node in a larger A2A mesh.
+**One hosted agent, or many? (in-process vs. A2A).** Notice all four agents live in the *same* process and share one `FoundryChatClient`; `workflow.as_agent()` then wraps the whole graph as a **single** hosted agent — so deployment is unchanged (no new azd-managed resource, no `azd provision`). The manager's speaker selections and the participant runs are in-memory calls: fast, simple, and easy to trace. The alternative is to deploy each specialist as its **own** hosted agent and have the Coordinator reach them remotely over the **A2A (Agent-to-Agent) protocol** (or expose one deployed agent as a function tool of another). Remote agents can be scaled, versioned, owned, and reused independently — even across teams, languages, or vendors — but every round now pays a network hop plus auth and serialization cost, and you operate N deployments instead of one. Rule of thumb: keep chatty, tightly-coupled specialists **in-process** (what we do here); reach for **A2A** only when a specialist genuinely needs to be independently deployed or reused. The two compose — a hosted agent like this one can itself be a node in a larger A2A mesh.
 
 **Learn more**
 
@@ -65,15 +65,31 @@ graph TD
 
 ## Steps
 
-### 1. Read the specialist config slices
+### 1. Read the specialist cards
 
-The per-specialist config slices are **already in the repo** — one folder per specialist under `travel_assistant/agents/`, delivered complete when you advanced. Each folder holds an `agent.yaml` (the role, `description`, and `instructions`) and an `agent.manifest.yaml` (the capability slice: `tools`, `rag`, `skills`). You don't edit them here — **open and read them**, because in the next section you translate each one into the code that builds that specialist.
+The per-specialist cards are **already in the repo** — one `specialist.yaml` per specialist under `travel_assistant/agents/`, delivered complete when you advanced. Each card holds the specialist's identity and brief at the top (`name`, `displayName`, `description`, `instructions`) and, below it, its capability slice under `capabilities:` (`tools`, `rag`, `skills`). You don't edit them here — **open and read them**, because in the next section you translate each one into the code that builds that specialist.
 
 ```text
 travel_assistant/agents/
-├── flights/     { agent.yaml, agent.manifest.yaml }   # weather + local time + currency + toolbox flights (fares)
-├── hotels/      { agent.yaml, agent.manifest.yaml }   # currency + toolbox web + destinations RAG
-└── activities/  { agent.yaml, agent.manifest.yaml }   # toolbox web + destinations RAG + travel-guide/guardrails skills
+├── flights/specialist.yaml      # weather + local time + currency + toolbox flights (fares)
+├── hotels/specialist.yaml       # currency + toolbox web + destinations RAG
+└── activities/specialist.yaml   # toolbox web + destinations RAG + travel-guide/guardrails skills
+```
+
+For example, the `capabilities:` block of `hotels/specialist.yaml`:
+
+```yaml
+# travel_assistant/agents/hotels/specialist.yaml (excerpt)
+capabilities:
+  tools:
+    - name: convert_currency
+      source: travel_assistant.tools
+    - name: travel-toolbox
+      source: foundry-toolbox
+  rag:
+    - name: destinations-index
+      source: azure-ai-search
+  skills: []
 ```
 
 Reading them, notice the intended boundary of each specialist:
@@ -82,30 +98,30 @@ Reading them, notice the intended boundary of each specialist:
 - **Hotels** — `convert_currency`, the toolbox (its web search for live rates and availability signals), and the destinations index (RAG).
 - **Activities** — the toolbox (web search), the destinations index (RAG), **and** the two skills that shape the final deliverable: the LOCAL `travel-guide` skill (renders the shareable PDF trip guide) and the Foundry `response-guardrails` skill. In this group chat the skills ride on the **Activities specialist**, not the Coordinator/manager (see the callout below).
 
-Three small slices make each specialist's intended boundary explicit and easy to review — they're the architecture spec a teammate reads before touching the graph.
+Three small cards make each specialist's intended boundary explicit and easy to review — they're the architecture spec a teammate reads before touching the graph.
 
-> **The Foundry skill is optional here.** The **Activities** specialist owns the two skills that shape the final answer — the LOCAL `travel-guide` skill (renders the shareable PDF trip guide) and the Foundry `response-guardrails` skill carried from Step 6 — and the delivered `coordinator.py` (like the checked-in solution) is the **Foundry-enabled reference**: its `_build_skills_provider`, `ACTIVITIES_INSTRUCTIONS`, and `.env.example` all wire the guardrails skill in and treat it as required. If you built it in Step 6, keep it as delivered. If you **skipped** the Foundry skill (for example your Foundry project can't allow public network access — see Step 6), make two small edits in `coordinator.py`: replace the body of `_build_skills_provider` with your Step 6 *local-only* provider, and drop the `response-guardrails` line from `ACTIVITIES_INSTRUCTIONS` (leaving `FOUNDRY_SKILL_NAMES` unset). The local `travel-guide` skill still renders the PDF and nothing else in this step depends on the Foundry skill.
+> **The Foundry skill is optional here.** The **Activities** specialist owns the two skills that shape the final answer — the LOCAL `travel-guide` skill (renders the shareable PDF trip guide) and the Foundry `response-guardrails` skill carried from Step 6 — and the delivered `coordinator.py` (like the checked-in solution) is the **Foundry-enabled reference**: its `_build_skills_provider`, `ACTIVITIES_INSTRUCTIONS`, and `.env.example` all wire the guardrails skill in and treat it as required. If you built it in Step 6, keep it as delivered. If you **skipped** the Foundry skill (for example your Foundry project can't allow public network access — see Step 6), make two small edits in `coordinator.py`: replace the body of `_build_skills_provider` with your Step 6 *local-only* provider, and drop the `response-guardrails` line from `ACTIVITIES_INSTRUCTIONS` (leaving `SKILL_NAMES` unset). The local `travel-guide` skill still renders the PDF and nothing else in this step depends on the Foundry skill.
 
 > **Why the skills ride on Activities, not the Coordinator.** A skills provider is a **context provider that registers its skill *tools*** on whichever agent holds it. But the Coordinator here is the group chat **manager**: `GroupChatBuilder` invokes it each round for a *structured* routing decision (which specialist speaks next, or terminate with the final answer). You *could* attach tools or a skills provider to it — the framework doesn't strip them — but a skill it carried wouldn't reliably fire, because the manager's turn produces that routing decision, not the free, tool-driven answer that renders the PDF and runs the guardrail. The skills therefore live on the **Activities specialist** — a normal participant that runs its tools and skills freely. The trade-off: only Activities' output is guarded, not the manager's final synthesis, and the manager has to *route* the deliverable through Activities rather than being *structurally* forced to. That's a real limitation of a manager-plus-specialists chat, and it's exactly what **Step 8** fixes — its workflow adds a dedicated `finalize` node that owns the deliverable and guards the actual final answer.
 
-> **These slices are documentation, not runtime config.** Nothing loads `agent.yaml`/`agent.manifest.yaml` at run time. `coordinator.py` builds each specialist directly in Python: the `instructions:` are already string constants there, and the tool/RAG/skill slices become the `tools=[...]` and `context_providers=[...]` arguments you write in the next section. The slices are the reviewable **contract**; `coordinator.py` is the executable **source of truth**. That means they can drift, so when a specialist behaves unexpectedly, inspect `coordinator.py` first — then realign the slice so the two agree.
+> **These cards are documentation, not runtime config.** Nothing loads `specialist.yaml` at run time, and it isn't an azd or Foundry agent definition — the one hosted agent is still the `travel-buddy` service in `azure.yaml`. `coordinator.py` builds each specialist directly in Python: the `instructions:` are already string constants there, and the `capabilities:` slices become the `tools=[...]` and `context_providers=[...]` arguments you write in the next section. The cards are the reviewable **contract**; `coordinator.py` is the executable **source of truth**. That means they can drift, so when a specialist behaves unexpectedly, inspect `coordinator.py` first — then realign the card so the two agree.
 
 ### 2. Complete the specialists in `coordinator.py`
 
-The Coordinator is the group chat **manager** — the single brain that decides which specialist speaks each round and writes the final answer. `coordinator.py` was delivered **almost complete** when you advanced: the instruction constants (already translated from the `agents/*/agent.yaml` slices), your Step 5 `_build_search_provider`, your Step 6 `run_local_skill_script` + `_build_skills_provider`, the manager `Coordinator`, and the `GroupChatBuilder` graph are all wired. `GroupChatBuilder` — from `agent_framework.orchestrations`, a separate `agent-framework-orchestrations` package already in `requirements.txt` — registers the participants, wires the manager between them, and every round asks the manager (via a structured response) who speaks next or whether to stop.
+The Coordinator is the group chat **manager** — the single brain that decides which specialist speaks each round and writes the final answer. `coordinator.py` was delivered **almost complete** when you advanced: the instruction constants (already translated from the `agents/*/specialist.yaml` cards), your Step 5 `_build_search_provider`, your Step 6 `run_local_skill_script` + `_build_skills_provider`, the manager `Coordinator`, and the `GroupChatBuilder` graph are all wired. `GroupChatBuilder` — from `agent_framework.orchestrations`, a separate `agent-framework-orchestrations` package already in `requirements.txt` — registers the participants, wires the manager between them, and every round asks the manager (via a structured response) who speaks next or whether to stop.
 
-**Your job is the single `TODO`: turn the `agents/*` slices into the specialists.** `FlightsSpecialist` is already written in the file as the worked example; you add `HotelsSpecialist` and `ActivitiesSpecialist`. That translation *is* the lesson of this step — capability slicing is what makes a multi-agent system more than three copies of the same agent.
+**Your job is the single `TODO`: turn the `agents/*/specialist.yaml` cards into the specialists.** `FlightsSpecialist` is already written in the file as the worked example; you add `HotelsSpecialist` and `ActivitiesSpecialist`. That translation *is* the lesson of this step — capability slicing is what makes a multi-agent system more than three copies of the same agent.
 
-Each specialist is a normal `Agent` — the same constructor as Steps 4–6 — with a sliced `tools` list and, where relevant, sliced `context_providers`. Each slice is a **pair** of files: `agents/<name>/agent.yaml` holds the role (name, description, instructions) and `agents/<name>/agent.manifest.yaml` holds the capabilities (tools, rag, skills). Read both and map them across:
+Each specialist is a normal `Agent` — the same constructor as Steps 4–6 — with a sliced `tools` list and, where relevant, sliced `context_providers`. Each `agents/<name>/specialist.yaml` holds the identity (name, description, instructions) at the top and the capabilities (tools, rag, skills) under `capabilities:`. Read the whole card and map it across:
 
-| Slice field | `Agent(...)` argument |
+| Card field | `Agent(...)` argument |
 | --- | --- |
-| `agent.yaml` → `name:` | `name=` — the manager routes by name |
-| `agent.yaml` → `description:` | `description=` — feeds the manager's routing prompt |
-| `agent.yaml` → `instructions:` | `instructions=<the matching *_INSTRUCTIONS constant>` |
-| `agent.manifest.yaml` → `tools:` | `tools=[...]` — the function tools from `tools.py` plus `toolbox` |
-| `agent.manifest.yaml` → `rag:` | `context_providers=[search]` |
-| `agent.manifest.yaml` → `skills:` | `context_providers=[search, skills]` (Activities only) |
+| `name:` | `name=` — the manager routes by name |
+| `description:` | `description=` — feeds the manager's routing prompt |
+| `instructions:` | `instructions=<the matching *_INSTRUCTIONS constant>` |
+| `capabilities.tools:` | `tools=[...]` — the function tools from `tools.py` plus `toolbox` |
+| `capabilities.rag:` | `context_providers=[search]` |
+| `capabilities.skills:` | `context_providers=[search, skills]` (Activities only) |
 
 `FlightsSpecialist` is already written in the file as the worked example. Add the other two the same way:
 
@@ -116,7 +132,7 @@ Give both `default_options={"store": False}`, exactly like the delivered `flight
 
 **How the manager picks a speaker.** `GroupChatBuilder` builds the selection prompt for you: each round it shows the manager the conversation plus the participants' **names and `description`s**, and asks for a structured decision — the next speaker, or *terminate* with a final message. So the `description=` fields you write do the routing work here (keep them crisp), while `COORDINATOR_INSTRUCTIONS` (delivered) sets the manager's *policy*: gather order, when to finish, and how to write the final answer. You don't hand-write any speaker-selection tools.
 
-Read `COORDINATOR_INSTRUCTIONS` before you run — it's the manager's brief, and the one constant with no slice behind it: it states the role, one routing rule per specialist, "for a full trip gather flights and hotels first, then choose Activities **last**", "include Activities' guarded guide and its PDF link verbatim", and "you never call tools yourself".
+Read `COORDINATOR_INSTRUCTIONS` before you run — it's the manager's brief, and the one constant with no card behind it: it states the role, one routing rule per specialist, "for a full trip gather flights and hotels first, then choose Activities **last**", "include Activities' guarded guide and its PDF link verbatim", and "you never call tools yourself".
 
 Notice its **"Plan first, ask almost never"** section, and the matching "never stop to ask" boundary in each specialist. Without them a manager-led chat degenerates into an interrogation: asked for a Tokyo trip with no departure date, the model happily terminates with "what are your dates, how many travelers, which cabin class?" and the traveler answers three questions before seeing a plan. Telling every agent to assume a sensible default — and to *label* the assumption so a follow-up can correct it — is what makes the first turn produce an actual itinerary. The split is deliberate: **specialists never ask** — a detail with no default, like the departure city, is reported as missing, not requested — while the **Coordinator may close with exactly one** no-substitute question, and only after delivering the plan it could build. Prompting a multi-agent system is mostly this: deciding what each agent does when information is missing.
 
@@ -153,77 +169,54 @@ if __name__ == "__main__":
     main()
 ```
 
-Your Step 6 skills plumbing — `run_local_skill_script`, `TrustedSkillsProvider`, and the skill-download helpers — now lives in `coordinator.py`, so deleting the old `main.py` body drops nothing you still need. `tools.py`, `skills/`, and the manifests stay exactly where they are.
+Your Step 6 skills plumbing — `run_local_skill_script`, `TrustedSkillsProvider`, and the skill-download helpers — now lives in `coordinator.py`, so deleting the old `main.py` body drops nothing you still need. `tools.py`, `skills/`, and the `agents/*/specialist.yaml` cards stay exactly where they are.
 
-### 4. Update the manifest
+### 4. Update the agent's metadata in `azure.yaml`
 
-Metadata-only: append the `Multi-Agent` tag to your existing `tags` (if you kept the Foundry skill you'll also already have `Foundry Skills` from Step 6), update the `description` to mention the group chat, and add a `group_chat` block naming the manager + specialists. No new `template.environment_variables`; `resources` stays `[]`.
+Metadata-only: in the `travel-buddy` service of the repo-root `azure.yaml`, update the `description` to describe the group chat and append the `Multi-Agent` tag to your existing `tags` (if you kept the Foundry skill you'll also already have `Foundry Skills` from Step 6). The `env` map is unchanged — no new environment variables — and the manager and specialists are wired in code (`coordinator.py`), not in `azure.yaml`, which describes only how the one hosted agent is run.
 
 > **Keep `description` under 512 characters.** Foundry validates the agent description on deploy and rejects anything longer with `400 invalid_payload — String length … exceeds maximum 512`. The description has grown with every step, so trim it as you extend it rather than only appending.
 
 ```yaml
-# travel_assistant/agent.manifest.yaml (delta)
-metadata:
-  tags:
-    - Agent Framework
-    - AI Agent Hosting
-    - Azure AI AgentServer
-    - Responses Protocol
-    - Travel Assistant
-    - Function Tools
-    - MCP Tools
-    - Toolbox Tools
-    - RAG
-    - Skills
-    - Multi-Agent
-  group_chat:
-    manager: Coordinator
-    specialists: [FlightsSpecialist, HotelsSpecialist, ActivitiesSpecialist]
+# azure.yaml — under services: travel-buddy:
+    description: TravelBuddy as a multi-agent group chat - a Coordinator routes each round to the Flights, Hotels, or Activities specialist, then synthesizes the answer.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+        - Function Tools
+        - MCP Tools
+        - Toolbox Tools
+        - RAG
+        - Skills
+        - Foundry Skills
+        - Multi-Agent     # <-- added
 ```
 
 ## Run and deploy TravelBuddy
 
-`azd ai agent init` **copies** your `travel_assistant/` code into the generated `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder — that copy is the snapshot azd builds and deploys. You changed code in `travel_assistant/`, so **re-init** to refresh the snapshot. There are **no** new variables to `azd env set` (reuse the azd environment from earlier steps) and you do **not** run `azd provision` — you added no Azure resource (`resources:` is still `[]`, and no new project role is required).
+**No new setup needed.** `azd` packages `travel_assistant/` straight from your working tree on every `azd ai agent run` and `azd deploy`, so `coordinator.py`, the `agents/` cards, and your new `main.py` are picked up automatically. There are **no** new variables to `azd env set` (reuse the azd environment from earlier steps) and you do **not** run `azd provision` — you added no Azure resource and no new project role is required. Run every command from the **repo root**.
 
-1. **Re-init from the repository root.** Load your `.env` into the shell first so `WORKSHOP_RESOURCE_PREFIX` expands:
-
-   <!-- terminal -->
-   ```bash
-   # bash / zsh
-   set -a; source .env; set +a
-   azd ai agent init -m travel_assistant/agent.manifest.yaml \
-     --agent-name "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   ```
-
-   <!-- terminal -->
-   ```powershell
-   # PowerShell
-   Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
-     $name, $value = $_ -split '=', 2
-     Set-Item "Env:$($name.Trim())" $value.Trim().Trim('"').Trim("'")
-   }
-   azd ai agent init -m travel_assistant/agent.manifest.yaml `
-     --agent-name "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   ```
-
-2. **Run TravelBuddy locally** and invoke the Coordinator from a second terminal:
+1. **Run TravelBuddy locally** and invoke the Coordinator from a second terminal:
 
    <!-- terminal -->
    ```bash
-   # terminal 1 — from the project folder:
-   cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+   # terminal 1 — from the repo root:
    azd ai agent run
    ```
 
    <!-- terminal -->
    ```bash
-   # terminal 2 — ask for a full trip plan:
+   # terminal 2 — also at the repo root, ask for a full trip plan:
    azd ai agent invoke --local "Help me plan a 5-day Tokyo trip: flights from Lisbon, a hotel near Shibuya under €200/night, and a day-trip suggestion."
    ```
 
    A good trace shows the Coordinator consulting more than one specialist — depending on log level you may see the manager's speaker selections, specialist names in the messages, or per-specialist tool calls. Prefer a UI? With the local agent still running, open the **Agent Inspector** from the Foundry Toolkit (Command Palette → **Foundry Toolkit: Open Agent Inspector**).
 
-3. **Deploy to Foundry** and invoke the deployed agent:
+2. **Deploy to Foundry** and invoke the deployed agent:
 
    <!-- terminal -->
    ```bash
@@ -231,7 +224,7 @@ metadata:
    azd ai agent invoke "Help me plan a 5-day Tokyo trip: flights from Lisbon, a hotel near Shibuya under €200/night, and a day-trip suggestion."
    ```
 
-   `azd deploy` builds the container image from the **refreshed** snapshot, pushes it, and rolls out a new hosted agent version. The whole group chat deploys **inside** the single container, so nothing else is needed — no role grant, no `azd provision`.
+   `azd deploy` uploads `travel_assistant/` as source — now including `coordinator.py` and your new `main.py` — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version. The whole group chat runs within this single hosted agent, so nothing else is needed — no role grant, no container registry, no `azd provision`.
 
 ## Try it
 
@@ -269,7 +262,7 @@ The manager chooses the next speaker from each participant's **`description`** p
 
 ### Tool not available to a specialist
 
-Each specialist gets only the capabilities you pass it in `coordinator.py` (and documents them in its `agents/*/agent.manifest.yaml` slice). Add the tool to the specialist that needs it and restart the server so the graph is rebuilt.
+Each specialist gets only the capabilities you pass it in `coordinator.py` (and documents them under `capabilities:` in its `agents/*/specialist.yaml` card). Add the tool to the specialist that needs it and restart the server so the graph is rebuilt.
 
 ### Specialist answers outside its lane
 
@@ -285,11 +278,11 @@ The delivered `coordinator.py` imports `get_weather`, `get_local_time`, and `con
 "message": "String length 568 exceeds maximum 512", "param": "description"
 ```
 
-Foundry caps the agent `description` at **512 characters**. The manifest description grows with every step, so trim it — describe the shape of the agent, not every tool — and re-run `azd ai agent init` before `azd deploy`.
+Foundry caps the agent `description` at **512 characters**. The `description` in `azure.yaml` grows with every step, so trim it — describe the shape of the agent, not every tool — then `azd deploy` again.
 
 ### Deploy didn't pick up my change
 
-`azd ai agent init` **copied** your code into `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`. Re-run `azd ai agent init` to refresh the snapshot, then `azd deploy` again.
+`azd deploy` packages `travel_assistant/` straight from your working tree, so make sure you saved your edits and ran `azd deploy` from the **repo root** (where `azure.yaml` lives). If you changed an environment variable, `azd env set` it, confirm its entry exists in the `travel-buddy` service's `env` map in `azure.yaml`, and redeploy.
 
 ## Solution
 

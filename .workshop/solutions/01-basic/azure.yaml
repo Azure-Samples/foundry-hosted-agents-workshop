@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+#
+# azure.yaml — the single Azure Developer CLI (azd) file that describes how
+# TravelBuddy is configured and deployed to Microsoft Foundry.
+# It lives at the repo root (a sibling of travel_assistant/) and you keep
+# editing this same file in later steps. This solution folder holds the
+# travel_assistant/ files flat, so copy azure.yaml to your repo root.
+# Reference (every field explained):
+# https://learn.microsoft.com/azure/foundry/agents/concepts/azure-yaml-reference
+requiredVersions:
+  azd: ">=1.37.0"
+  extensions:
+    azure.ai.agents: ">=1.0.0-beta.20"
+    azure.ai.projects: ">=1.0.0-beta.14"
+name: travel-buddy-workshop
+services:
+  # The Foundry project TravelBuddy runs in. You connect it to the project you
+  # created in Step 0 once, with `azd ai project add` (see the Step 1 doc); that
+  # command records the project in your azd environment and adds an `endpoint:`
+  # here. There are no `deployments:` because you already deployed a model in
+  # Step 0 — azd must not create or manage one.
+  ai-project:
+    host: azure.ai.project
+  # The hosted agent itself.
+  travel-buddy:
+    host: azure.ai.agent
+    # Source folder uploaded for source-code deployment.
+    project: travel_assistant
+    # Foundry installs requirements.txt in its managed Python runtime.
+    language: python
+    codeConfiguration:
+      runtime: python_3_13
+      entryPoint: main.py
+      dependencyResolution: remote_build
+    uses:
+      - ai-project
+    kind: hosted
+    # The deployed agent's identity in your Foundry project. Replace
+    # <your-prefix> with your WORKSHOP_RESOURCE_PREFIX (letters, digits, and
+    # hyphens only) so it stays unique in a shared project and
+    # .workshop/scripts/cleanup.py can find it.
+    name: <your-prefix>-travel-buddy
+    description: A basic Agent Framework travel assistant hosted by Foundry.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+    protocols:
+      - protocol: responses
+        version: 2.0.0
+    # Environment variables for the running agent. Each ${VAR} is resolved from
+    # your azd environment (.azure/<env-name>/.env), not from the repo .env.
+    env:
+      PYTHONNOUSERSITE: "1"
+      # Set by `azd ai project add`.
+      AZURE_AI_PROJECT_ENDPOINT: ${FOUNDRY_PROJECT_ENDPOINT}
+      AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+      WORKSHOP_RESOURCE_PREFIX: ${WORKSHOP_RESOURCE_PREFIX}
+    container:
+      resources:
+        cpu: "0.25"
+        memory: 0.5Gi
+infra:
+  provider: microsoft.foundry

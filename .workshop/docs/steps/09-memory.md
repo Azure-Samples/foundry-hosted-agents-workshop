@@ -17,7 +17,7 @@
 - `travel_assistant/coordinator.py` — the Step 8 specialist factories (`make_client`, `create_flights_agent`, `create_hotels_agent`, `create_activities_agent`). This step adds memory there so every specialist gains it from one place.
 - `travel_toolbox/toolbox.yaml` — unchanged.
 
-This step adds `provision_memory_store.py`, a small delta on `coordinator.py`, two new environment variables, and a `Memory` tag. `main.py` and `workflow.py` are **unchanged**, and there are **no** new Azure resources in the manifest.
+This step adds `provision_memory_store.py`, a small delta on `coordinator.py`, two new environment variables, and a `Memory` tag. `main.py` and `workflow.py` are **unchanged**, and there are **no** new azd-managed resources — just two new `env` entries in `azure.yaml`.
 
 ## Concept (5-min read)
 
@@ -52,7 +52,7 @@ flowchart LR
 
 ### 1. Provision the memory store (out of band)
 
-A memory store is a Foundry primitive, not an Azure resource you declare in the manifest — so you create it once with a helper script, the same way you provisioned the Search index in Step 5. Create `travel_assistant/provision_memory_store.py`. It reads your `.env`, creates the store named by `MEMORY_STORE_NAME` if it does not already exist, and is safe to re-run.
+A memory store is a Foundry primitive, not an Azure resource that `azd` provisions from `azure.yaml` — so you create it once with a helper script, the same way you provisioned the Search index in Step 5. Create `travel_assistant/provision_memory_store.py`. It reads your `.env`, creates the store named by `MEMORY_STORE_NAME` if it does not already exist, and is safe to re-run.
 
 ```python
 # travel_assistant/provision_memory_store.py
@@ -155,55 +155,43 @@ def create_hotels_agent(client, credential=None) -> Agent:
 
 Reusing `client.project_client` (instead of constructing a second `AIProjectClient`) keeps a single authentication context, and putting memory in the factories means the runtime Coordinator (Step 7) and the hosted workflow (Step 8) both pick it up from one source of truth. `main.py` and `workflow.py` need **no** changes.
 
-### 3. Declare the new configuration
+### 3. Declare the new configuration in `azure.yaml`
 
-Add the two new variables so local tooling and the hosted container both receive them. In `agent.yaml`, append to `environment_variables`:
-
-```yaml
-# travel_assistant/agent.yaml (delta)
-  - name: AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME
-    value: ${AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME}
-  - name: MEMORY_STORE_NAME
-    value: ${MEMORY_STORE_NAME}
-```
-
-In `agent.manifest.yaml`, append the `Memory` tag, add a memory `tool_declaration`, and mirror the two variables under `template.environment_variables`. `resources` stays `[]`:
+Add the two new variables to the `env` map of the `travel-buddy` service in the repo-root `azure.yaml`, so the hosted container receives them. While you're there, update the `description` and append the `Memory` tag:
 
 ```yaml
-# travel_assistant/agent.manifest.yaml (delta)
-metadata:
-  tags:
-    - Agent Framework
-    - AI Agent Hosting
-    - Azure AI AgentServer
-    - Responses Protocol
-    - Travel Assistant
-    - Function Tools
-    - MCP Tools
-    - Toolbox Tools
-    - RAG
-    - Skills
-    - Multi-Agent
-    - Workflows
-    - Memory
-  tool_declarations:
-    - name: travelbuddy_memory
-      description: Durable, per-user memory backed by a Foundry Memory Store, scoped via {{$userId}}.
-      type: memory
-      memory_store_name: ${MEMORY_STORE_NAME}
-template:
-  environment_variables:
-    - name: AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME
-      value: ${AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME}
-    - name: MEMORY_STORE_NAME
-      value: ${MEMORY_STORE_NAME}
+# azure.yaml — under services: travel-buddy:
+    description: TravelBuddy as a durable workflow whose specialists use Foundry Memory, so per-user preferences persist across conversations.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+        - Function Tools
+        - MCP Tools
+        - Toolbox Tools
+        - RAG
+        - Skills
+        - Foundry Skills
+        - Multi-Agent
+        - Workflows
+        - Memory     # <-- added
+    # ...
+    env:
+      # ... existing entries from earlier steps ...
+      AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME}   # <-- added
+      MEMORY_STORE_NAME: ${MEMORY_STORE_NAME}                                                 # <-- added
 ```
+
+The memory provider itself is wired in code in `coordinator.py` — `azure.yaml` describes how the agent is hosted, not what it can do. Each `${VAR}` resolves from your **azd environment**, which you'll populate in the next section.
 
 Add both variables to `.env` as well — `MEMORY_STORE_NAME` (keep it prefixed with `WORKSHOP_RESOURCE_PREFIX` so cleanup can find it) and `AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME` (the name of your embedding deployment in Foundry).
 
 ## Run and deploy TravelBuddy
 
-You changed code in `travel_assistant/`, so you must **re-init** to refresh the snapshot in `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`. There are two new variables to set in the azd environment, and you do **not** run `azd provision` (the memory store was created out of band in step 1).
+**No new setup needed.** `azd` packages `travel_assistant/` straight from your working tree on every `azd ai agent run` and `azd deploy`, so your `coordinator.py` changes are picked up automatically. What *is* new is configuration: the two variables you added to `azure.yaml` resolve from your **azd environment**, so register them there once. You do **not** run `azd provision` (the memory store is created out of band in step 1, and the embedding deployment already lives in your Foundry project). Run every command from the **repo root**.
 
 Load your `.env` into the shell first:
 
@@ -220,12 +208,20 @@ Get-Content .env | Where-Object { $_ -match '=' -and $_ -notmatch '^\s*#' } | Fo
 }
 ```
 
-Register the two new variables with azd (once):
+Register **only** the two new variables with azd (once — earlier values such as `AZURE_AI_MODEL_DEPLOYMENT_NAME` are already there):
 
 <!-- terminal -->
 ```bash
+# bash / zsh
 azd env set MEMORY_STORE_NAME "$MEMORY_STORE_NAME"
 azd env set AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME "$AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME"
+```
+
+<!-- terminal -->
+```powershell
+# PowerShell
+azd env set MEMORY_STORE_NAME "$env:MEMORY_STORE_NAME"
+azd env set AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME "$env:AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME"
 ```
 
 Make sure the store exists before you run (safe to re-run):
@@ -235,23 +231,37 @@ Make sure the store exists before you run (safe to re-run):
 python travel_assistant/provision_memory_store.py
 ```
 
-### Run locally
+1. **Run TravelBuddy locally:**
 
-<!-- terminal -->
-```bash
-azd ai agent init
-azd ai agent run
-azd ai agent invoke --local --message "I always fly out of SEA and prefer window seats on a mid-range budget."
-```
+   <!-- terminal -->
+   ```bash
+   azd ai agent run
+   ```
 
-### Deploy
+   `azd` reads the `travel-buddy` service in `azure.yaml`, resolves its `env` (now including `MEMORY_STORE_NAME`) from your azd environment, and starts the server on `http://localhost:8088`. Leave this terminal running.
 
-<!-- terminal -->
-```bash
-azd ai agent init
-azd deploy
-azd ai agent invoke --message "Plan a 4-day trip to Rome for me."
-```
+2. **Invoke the local agent from a second terminal** (also at the repo root):
+
+   <!-- terminal -->
+   ```bash
+   azd ai agent invoke --local "I always fly out of SEA and prefer window seats on a mid-range budget."
+   ```
+
+3. **Deploy to Foundry:**
+
+   <!-- terminal -->
+   ```bash
+   azd deploy
+   ```
+
+   `azd deploy` uploads `travel_assistant/` as source, and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version with the two new variables in its environment. No container registry is needed.
+
+4. **Invoke the deployed agent:**
+
+   <!-- terminal -->
+   ```bash
+   azd ai agent invoke "Plan a 4-day trip to Rome for me."
+   ```
 
 ## Try it
 
@@ -259,14 +269,14 @@ Prove memory survives across conversations. First, teach TravelBuddy a durable p
 
 <!-- terminal -->
 ```bash
-azd ai agent invoke --message "Remember I'm vegetarian, I prefer trains over flights, and my home base is Lisbon."
+azd ai agent invoke "Remember I'm vegetarian, I prefer trains over flights, and my home base is Lisbon."
 ```
 
 Then, in a **new** invocation, ask for a plan and watch it apply what it remembers:
 
 <!-- terminal -->
 ```bash
-azd ai agent invoke --message "Plan a long weekend in northern Spain."
+azd ai agent invoke "Plan a long weekend in northern Spain."
 ```
 
 Expect rail-first routing from Lisbon and vegetarian-friendly food suggestions. Ask `What do you remember about me?` and it should list the stored facts. Because the solution sets `update_delay=0`, writes land right away; if you removed that override the default 5-minute debounce applies and recall would lag behind the first call.
@@ -314,7 +324,7 @@ If cleanup lists it as skipped, the name has no prefix match — delete it manua
 
 ### Deploy didn't pick up my change
 
-`azd ai agent init` **copied** your code into `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`. Re-run `azd ai agent init`, then `azd deploy` again.
+`azd` packages `travel_assistant/` from your working tree, so code edits deploy as soon as you run `azd deploy` from the repo root (where `azure.yaml` lives). If memory works locally but not when deployed, confirm `azure.yaml` has the `AZURE_AI_EMBEDDING_MODEL_DEPLOYMENT_NAME` and `MEMORY_STORE_NAME` entries under the `travel-buddy` service's `env`, that both are set in the azd environment (`azd env get-values`; re-run the `azd env set` commands above if not), then `azd deploy` again.
 
 ## Solution
 

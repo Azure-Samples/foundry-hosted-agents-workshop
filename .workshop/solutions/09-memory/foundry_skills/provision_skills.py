@@ -2,8 +2,9 @@
 """Upload the Foundry skill(s) to the Foundry project (out-of-band).
 
 Mirrors ``travel_indexer/provision_index.py``: this is *tooling*, not part of the
-deployed agent. ``azd ai agent init`` snapshots only ``travel_assistant/``, so this
-folder is never bundled into the container. Run it once (and again after editing a
+deployed agent. ``azd deploy`` packages only ``travel_assistant/`` (the agent
+service's ``project:`` in ``azure.yaml``), so this folder is never bundled into the
+container. Run it once (and again after editing a
 Foundry skill's ``SKILL.md``); the deployed agent downloads the result at runtime.
 
 Each run uploads a **new version** of the skill (existing versions are left intact),

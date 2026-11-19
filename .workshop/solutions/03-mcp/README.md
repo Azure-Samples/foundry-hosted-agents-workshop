@@ -4,6 +4,8 @@
 
 Keeps the Step 2 function tools (`get_weather`, `get_local_time`, `convert_currency`) and adds an OctoTrip Flights MCP connection for live flight search. Point `MCP_SERVER_URL` at a different MCP server if you prefer.
 
+Files sit flat here; in your repo they live in `travel_assistant/`, except `azure.yaml`, which belongs at the repo root (with `project: travel_assistant`).
+
 ## Run it
 
 1. Copy `.env.example` to `.env` and fill in values (including `MCP_SERVER_LABEL` and `MCP_SERVER_URL`).

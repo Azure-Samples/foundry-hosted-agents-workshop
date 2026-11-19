@@ -1,6 +1,6 @@
 # Step 6 — Package a reusable behaviour as a Skill (local **and** Foundry)
 
-> **Goal:** package repeatable behaviour into named, reusable **Skills** the model loads on demand. You work through it in **two parts**. **Part A** ships a **local** `travel-guide` skill (already in your repo) that renders a colorful, downloadable PDF trip guide grounded in your Step 5 RAG index — you *review* it, wire it into `main.py` and the manifest, then re-init, run, and deploy. **Part B** adds a **Foundry** `response-guardrails` skill uploaded to the project — a reusable behaviour any agent can share — then re-init, run, and deploy again. You keep the Step 5 tools, toolbox, and RAG intact throughout.
+> **Goal:** package repeatable behaviour into named, reusable **Skills** the model loads on demand. You work through it in **two parts**. **Part A** ships a **local** `travel-guide` skill (already in your repo) that renders a colorful, downloadable PDF trip guide grounded in your Step 5 RAG index — you *review* it, wire it into `main.py`, tag it in `azure.yaml`, then run and deploy. **Part B** adds a **Foundry** `response-guardrails` skill uploaded to the project — a reusable behaviour any agent can share — then run and deploy again. You keep the Step 5 tools, toolbox, and RAG intact throughout.
 
 ## What you'll learn
 
@@ -9,7 +9,7 @@
 - The difference between a **local skill** (ships with your agent code) and a **Foundry skill** (uploaded to the project, downloaded at runtime, shareable across agents)
 - Why local skills may run a **trusted script runner** while a **script filter** blocks any downloaded Foundry skill from executing code — and why both live behind a **single** provider so their tool names never collide
 - Why skills keep instructions lean — repeated behaviour lives in a folder (or in the project), not in an ever-growing system prompt
-- That Foundry skills need a **project role** (`Foundry User`) and **public network access**, yet still don't change your deployment shape — still `resources: []`, no `azd provision`
+- That Foundry skills need a **project role** (`Foundry User`) and **public network access**, yet still don't change your deployment shape — no new azd-managed resource, no `azd provision`
 
 ## What's already in the repo
 
@@ -21,7 +21,7 @@
   - `foundry_skills/skills/response-guardrails/SKILL.md` — the **source of truth** for the Foundry skill (delivered; its exact wording isn't the point — the *wiring* is).
   - `foundry_skills/provision_skills.py` — a complete, one-shot uploader you run once (and again after editing the Foundry skill's `SKILL.md`).
 
-**Why `foundry_skills/` lives outside `travel_assistant/`.** `azd ai agent init` snapshots **only** `travel_assistant/` when it packages the deployed agent. The Foundry skill is uploaded to the **project** once, offline — the provisioning script and its source `SKILL.md` are *tooling*, not part of the running agent — so they live in a sibling folder that is never bundled into the container, exactly like `travel_indexer/` and `travel_toolbox/`. At runtime the agent downloads the finished skill from the project; it never needs `provision_skills.py` on disk.
+**Why `foundry_skills/` lives outside `travel_assistant/`.** `azd deploy` packages **only** `travel_assistant/` (the `travel-buddy` service's `project:` in `azure.yaml`) into the deployed agent's container. The Foundry skill is uploaded to the **project** once, offline — the provisioning script and its source `SKILL.md` are *tooling*, not part of the running agent — so they live in a sibling folder that is never bundled into the container, exactly like `travel_indexer/` and `travel_toolbox/`. At runtime the agent downloads the finished skill from the project; it never needs `provision_skills.py` on disk.
 
 **Source-of-truth discipline.** Edit `foundry_skills/skills/response-guardrails/SKILL.md`, then re-run `provision_skills.py`. The agent re-downloads the skill at runtime into a writable temp dir (`<tempdir>/foundry_downloaded_skills/`) — **never edit that copy** (it is a throwaway cache, recreated each startup). Two copies is expected, and mirrors the indexer (source JSON vs. the live index).
 
@@ -85,7 +85,7 @@ flowchart LR
 
 ## Part A — Ship the local travel-guide Skill
 
-The local skill is already in your repo. In this part you **review** it, wire it into `main.py` and the manifest, then re-init, run, and deploy — a full end-to-end loop **before** you touch the Foundry skill.
+The local skill is already in your repo. In this part you **review** it, wire it into `main.py`, tag it in `azure.yaml`, then run and deploy — a full end-to-end loop **before** you touch the Foundry skill.
 
 ### A1. Review the delivered local skill
 
@@ -258,78 +258,50 @@ agent = Agent(
 
 The two `# NEW` lines are the only prompt change — they point the model at the local `travel-guide` skill. Every Step 5 instruction sentence before them stays verbatim (there's no separate `INSTRUCTIONS` constant; the prompt lives inline in the `instructions=( ... )` string, exactly as it did in Step 5).
 
-### A3. Declare the local skill in the manifest
+### A3. Tag the local skill in `azure.yaml`
 
-Add the local skill to the manifest metadata: a `travel-guide` entry under `tool_declarations` and a `Skills` tag. `resources` stays `[]`, and the local skill needs **no** new environment variable, so `agent.yaml` is unchanged in Part A.
+The local skill ships **inside** the container, so the hosted-agent shape doesn't change — same container, same `protocols`, same `env` (the local skill needs **no** new environment variable). The edit to the `travel-buddy` service in the repo-root `azure.yaml` is **metadata only**: update the `description` and append a `Skills` tag.
 
 ```yaml
-# travel_assistant/agent.manifest.yaml (delta)
-metadata:
-  tags:
-    - Agent Framework
-    - AI Agent Hosting
-    - Azure AI AgentServer
-    - Responses Protocol
-    - Travel Assistant
-    - Function Tools
-    - MCP Tools
-    - Toolbox Tools
-    - RAG
-    - Skills
-  tool_declarations:
-    # ... the Step 5 declarations stay ...
-    - name: travel-guide
-      description: >
-        Local Skill that renders a grounded, downloadable PDF travel guide (with a
-        day-by-day itinerary) via scripts/create_travel_guide.py.
-      type: skill
-# ... the template block (name, kind, protocols, environment_variables) stays ...
-resources: []
+# azure.yaml — under services: travel-buddy:
+    description: TravelBuddy with function tools, a Foundry Toolbox, destination RAG,     and a local travel-guide Skill.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+        - Function Tools
+        - MCP Tools
+        - Toolbox Tools
+        - RAG
+        - Skills     # <-- added
 ```
 
-### A4. Re-init, run locally, and deploy
+The skill itself is wired in code via `context_providers=[...]` in `main.py` — `azure.yaml` describes how the agent is hosted, not what it can do. Leave the rest of the file exactly as it was in Step 5.
 
-`azd ai agent init` **copies** your `travel_assistant/` code into the generated `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/` project folder — that copy is the snapshot azd builds and deploys. Your Part A edits live in `travel_assistant/`, so **re-init** to refresh the snapshot. You **don't** need `azd provision` — you added no Azure resource (`resources:` is still `[]`).
+### A4. Run locally and deploy
 
-1. **Re-init from the repository root.** Load your `.env` into the shell first so `WORKSHOP_RESOURCE_PREFIX` expands:
+**No new setup needed.** `azd` packages `travel_assistant/` straight from your working tree on every `azd ai agent run` and `azd deploy`, so the new `skills/` folder and your `main.py` changes are picked up automatically. You **don't** need `azd provision` — you added no Azure resource and no new environment variable. Run every command from the **repo root**.
 
-   <!-- terminal -->
-   ```bash
-   # bash / zsh
-   set -a; source .env; set +a
-   azd ai agent init -m travel_assistant/agent.manifest.yaml \
-     --agent-name "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   ```
-
-   <!-- terminal -->
-   ```powershell
-   # PowerShell
-   Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
-     $name, $value = $_ -split '=', 2
-     Set-Item "Env:$($name.Trim())" $value.Trim().Trim('"').Trim("'")
-   }
-   azd ai agent init -m travel_assistant/agent.manifest.yaml `
-     --agent-name "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   ```
-
-2. **Run TravelBuddy locally** and invoke the local skill from a second terminal:
+1. **Run TravelBuddy locally** and invoke the local skill from a second terminal:
 
    <!-- terminal -->
    ```bash
-   # terminal 1 — from the project folder:
-   cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+   # terminal 1 — from the repo root:
    azd ai agent run
    ```
 
    <!-- terminal -->
    ```bash
-   # terminal 2 — ask for a trip guide:
+   # terminal 2 — also at the repo root, ask for a trip guide:
    azd ai agent invoke --local "Make me a 4-day Lisbon travel guide as a PDF using our destinations index."
    ```
 
    Expected: the agent grounds on RAG, runs `create_travel_guide.py`, and replies with the PDF file `path`. Prefer a UI? With the local agent still running, open the **Agent Inspector** from the Foundry Toolkit (Command Palette → **Foundry Toolkit: Open Agent Inspector**).
 
-3. **Deploy to Foundry** and invoke the deployed agent:
+2. **Deploy to Foundry** and invoke the deployed agent:
 
    <!-- terminal -->
    ```bash
@@ -337,7 +309,7 @@ resources: []
    azd ai agent invoke "Make me a 3-day Reykjavik travel guide for winter as a PDF."
    ```
 
-   `azd deploy` builds the container image from the **refreshed** snapshot, pushes it, and rolls out a new hosted agent version. The local skill deploys **inside** the container, so nothing else is needed — no role grant, no `azd provision`.
+   `azd deploy` uploads `travel_assistant/` as source — now including `skills/travel-guide/` and your updated `main.py` — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version. The local skill is included in that source package, so nothing else is needed — no role grant, no container registry, no `azd provision`.
 
    Prefer a UI? Open the **Hosted Agent Playground** from the Foundry Toolkit (**Developer Tools** → **Build** → **Hosted Agent Playground**), pick your deployed agent and version, and ask for a guide — the generated PDF shows up under **Session Details → Files**.
 
@@ -428,7 +400,7 @@ azure-ai-projects
 
 If it's missing, add that line and reinstall with `uv pip install -r travel_assistant/requirements.txt` (or `pip install -r ...` with the venv activated).
 
-At startup the agent downloads each skill named in `FOUNDRY_SKILL_NAMES` into a **writable temp directory** (`<tempdir>/foundry_downloaded_skills/<name>/`). The deployed container's app directory is **read-only**, so the download can't sit next to `main.py`; the OS temp dir is writable both locally and in the hosted container. Add these imports and helpers to `main.py` (this mirrors the two download methods in the upstream `12-foundry-skills` sample):
+At startup the agent downloads each skill named in `SKILL_NAMES` into a **writable temp directory** (`<tempdir>/foundry_downloaded_skills/<name>/`). The deployed container's app directory is **read-only**, so the download can't sit next to `main.py`; the OS temp dir is writable both locally and in the hosted container. Add these imports and helpers to `main.py` (this mirrors the two download methods in the upstream `12-foundry-skills` sample):
 
 ```python
 # travel_assistant/main.py (delta — extends Part A)
@@ -448,8 +420,8 @@ SKILL_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 
 
 def _foundry_skill_names() -> list[str]:
-    """Parse FOUNDRY_SKILL_NAMES, treating an unresolved ${VAR}/{{VAR}} as empty."""
-    raw = os.environ.get("FOUNDRY_SKILL_NAMES", "").strip()
+    """Parse SKILL_NAMES, treating an unresolved ${VAR}/{{VAR}} as empty."""
+    raw = os.environ.get("SKILL_NAMES", "").strip()
     if (raw.startswith("${") and raw.endswith("}")) or (raw.startswith("{{") and raw.endswith("}}")):
         raw = ""
     parsed = [name.strip().strip('"').strip("'") for name in raw.split(",")]
@@ -486,7 +458,7 @@ async def _download_foundry_skills(endpoint: str, names: list[str]) -> None:
                 raise RuntimeError(f"Foundry skill '{name}' has no SKILL.md at its archive root.")
 ```
 
-Now **replace** the local-only provider from Part A with one that downloads the Foundry skill first, then serves **both** folders from a **single** `SkillsProvider`. `from_paths` takes the paths, one `script_runner`, and a `script_filter` that arms the runner for **local skills only**, so a downloaded (remote) skill can never execute local code. Because the Foundry skill is **required**, this **fails hard** (raises) if `FOUNDRY_SKILL_NAMES` is empty or the download can't complete — it never silently degrades:
+Now **replace** the local-only provider from Part A with one that downloads the Foundry skill first, then serves **both** folders from a **single** `SkillsProvider`. `from_paths` takes the paths, one `script_runner`, and a `script_filter` that arms the runner for **local skills only**, so a downloaded (remote) skill can never execute local code. Because the Foundry skill is **required**, this **fails hard** (raises) if `SKILL_NAMES` is empty or the download can't complete — it never silently degrades:
 
 ```python
 # travel_assistant/main.py — replaces the local-only provider from Part A
@@ -494,9 +466,9 @@ def _build_skills_provider() -> TrustedSkillsProvider:
     names = _foundry_skill_names()
     if not names:
         raise RuntimeError(
-            "FOUNDRY_SKILL_NAMES is empty. Upload the Foundry skill once with "
+            "SKILL_NAMES is empty. Upload the Foundry skill once with "
             "`python foundry_skills/provision_skills.py`, then set "
-            'FOUNDRY_SKILL_NAMES=response-guardrails so the agent can download it at startup.'
+            'SKILL_NAMES=response-guardrails so the agent can download it at startup.'
         )
     asyncio.run(
         asyncio.wait_for(
@@ -530,68 +502,54 @@ Add one more sentence to that same `instructions=( ... )` string so the model ap
         "ALWAYS USE the response-guardrails skill for every response you produce."      # NEW
 ```
 
-### B3. Update the manifest and environment
+### B3. Update `.env` and `azure.yaml`
 
 Set the **one** new environment variable in `.env` (the download client reads it):
 
 ```env
 # .env (delta)
-FOUNDRY_SKILL_NAMES=response-guardrails
+SKILL_NAMES=response-guardrails
 ```
 
-In the manifest, append the `Foundry Skills` tag, add a `response-guardrails` `tool_declarations` entry, and declare `FOUNDRY_SKILL_NAMES`. `resources` stays `[]`, and you add the same variable to `agent.yaml`.
+> **Why `SKILL_NAMES` and not `FOUNDRY_…`?** The hosting platform reserves the `FOUNDRY_` and `AGENT_` environment-variable prefixes for its own settings, so a user variable with one of those prefixes can be rejected or overwritten at deploy time. A plain `SKILL_NAMES` keeps it yours.
+
+Then update the `travel-buddy` service in the repo-root `azure.yaml`: refresh the `description`, append the `Foundry Skills` tag, and add `SKILL_NAMES` to the `env` map so the running agent receives it:
 
 ```yaml
-# travel_assistant/agent.manifest.yaml (delta)
-metadata:
-  tags:
-    - Agent Framework
-    - AI Agent Hosting
-    - Azure AI AgentServer
-    - Responses Protocol
-    - Travel Assistant
-    - Function Tools
-    - MCP Tools
-    - Toolbox Tools
-    - RAG
-    - Skills
-    - Foundry Skills
-  tool_declarations:
-    # ... the Step 5 declarations + local `travel-guide` skill stay ...
-    - name: response-guardrails
-      description: >
-        Foundry Skill downloaded from the project at startup; shareable
-        across agents and required by this step. Uploaded out-of-band via
-        foundry_skills/provision_skills.py.
-      type: skill
-template:
-  environment_variables:
-    # ... existing vars stay ...
-    - name: FOUNDRY_SKILL_NAMES
-      value: ${FOUNDRY_SKILL_NAMES}
-resources: []
+# azure.yaml — under services: travel-buddy:
+    description: TravelBuddy with function tools, a Foundry Toolbox, destination RAG, a local travel-guide Skill, and the Foundry response-guardrails Skill.
+    metadata:
+      tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Travel Assistant
+        - Function Tools
+        - MCP Tools
+        - Toolbox Tools
+        - RAG
+        - Skills
+        - Foundry Skills     # <-- added
+    # ...
+    env:
+      # ... existing vars stay ...
+      SKILL_NAMES: ${SKILL_NAMES}     # <-- added
 ```
 
-```yaml
-# travel_assistant/agent.yaml (delta)
-environment_variables:
-  # ... existing vars stay ...
-  - name: FOUNDRY_SKILL_NAMES
-    value: ${FOUNDRY_SKILL_NAMES}
-```
+Each `${VAR}` in `env` is resolved from your **azd** environment, not from the repo `.env` — you add the value there in the next section. The Foundry skill itself is uploaded out-of-band (B1) and wired in code (`main.py`); `azure.yaml` only describes how the agent is hosted.
 
-### B4. Re-init, run locally, deploy, and grant the instance identity
+### B4. Run locally, deploy, and grant the instance identity
 
-Re-init again to snapshot your Part B edits, and add the new variable to the azd env. You already uploaded the Foundry skill in B1 and confirmed `azure-ai-projects` in `requirements.txt` in B2 — no need to re-upload or reinstall here (if a local run reports `azure-ai-projects` missing, see Troubleshooting). Go straight to the re-init:
+**No new setup needed.** `azd` packages `travel_assistant/` straight from your working tree, so your Part B `main.py` is picked up automatically. You already uploaded the Foundry skill in B1 and confirmed `azure-ai-projects` in `requirements.txt` in B2 — no need to re-upload or reinstall here (if a local run reports `azure-ai-projects` missing, see Troubleshooting). There's still no `azd provision` — the skill lives in the project, not in azd-managed infrastructure. Run every command from the **repo root**.
 
-1. **Re-init from the repository root** (same as Part A — it refreshes the snapshot with your new `main.py` and the `FOUNDRY_SKILL_NAMES` variable):
+1. **Add the new value to the azd env.** azd keeps its **own** environment store (`.azure/<env-name>/.env`), separate from the repo `.env`. Load your `.env` into the shell first, then set only the **one new** variable:
 
    <!-- terminal -->
    ```bash
    # bash / zsh
    set -a; source .env; set +a
-   azd ai agent init -m travel_assistant/agent.manifest.yaml \
-     --agent-name "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
+   azd env set SKILL_NAMES "$SKILL_NAMES"
    ```
 
    <!-- terminal -->
@@ -601,52 +559,35 @@ Re-init again to snapshot your Part B edits, and add the new variable to the azd
      $name, $value = $_ -split '=', 2
      Set-Item "Env:$($name.Trim())" $value.Trim().Trim('"').Trim("'")
    }
-   azd ai agent init -m travel_assistant/agent.manifest.yaml `
-     --agent-name "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
+   azd env set SKILL_NAMES "$env:SKILL_NAMES"
    ```
 
-2. **`cd` into the project folder and add the new value to the azd env.** azd keeps its **own** environment store (`.azure/<env-name>/.env`), separate from the repo `.env`. You only need the **one new** variable:
+2. **Run TravelBuddy locally** and invoke the Foundry skill from a second terminal:
 
    <!-- terminal -->
    ```bash
-   # bash / zsh — after: set -a; source .env; set +a
-   cd "${WORKSHOP_RESOURCE_PREFIX}-travel-buddy"
-   azd env set FOUNDRY_SKILL_NAMES "$FOUNDRY_SKILL_NAMES"
-   ```
-
-   <!-- terminal -->
-   ```powershell
-   # PowerShell — after loading .env into the shell
-   cd "$($env:WORKSHOP_RESOURCE_PREFIX)-travel-buddy"
-   azd env set FOUNDRY_SKILL_NAMES "$env:FOUNDRY_SKILL_NAMES"
-   ```
-
-3. **Run TravelBuddy locally** and invoke the Foundry skill from a second terminal:
-
-   <!-- terminal -->
-   ```bash
-   # terminal 1:
+   # terminal 1 — from the repo root:
    azd ai agent run
    ```
 
    <!-- terminal -->
    ```bash
-   # terminal 2 — any prompt works; a sensitive one makes the guardrails obvious:
+   # terminal 2 — also at the repo root; any prompt works, a sensitive one makes the guardrails obvious:
    azd ai agent invoke --local "Is it safe to travel to Porto right now, and what vaccinations do I need?"
    ```
 
    On startup your `main.py` downloads the Foundry skill as *you* (you have `Foundry User` from the start of Part B). Expected: the response ends with `GUARDRAILS-APPLIED` — the Foundry skill now applies to **every** response, so the marker appears whatever you ask.
 
-4. **Deploy to Foundry**:
+3. **Deploy to Foundry**:
 
    <!-- terminal -->
    ```bash
    azd deploy
    ```
 
-   This builds the container image from the **refreshed** snapshot — now including your Part B `main.py` and `FOUNDRY_SKILL_NAMES` — and rolls out a new hosted agent version. Still no `azd provision` (infrastructure is unchanged).
+   `azd deploy` uploads `travel_assistant/` — now including your Part B `main.py` — and Foundry installs dependencies from `requirements.txt` using `remote_build` before rolling out a new hosted agent version with `SKILL_NAMES` in its environment. Still no container registry or `azd provision`.
 
-5. **Grant the deployed agent's instance identity `Foundry User` on the project.** Locally the agent downloaded the Foundry skill as *you*. Deployed, your `main.py` calls the Skills API with `DefaultAzureCredential`, which resolves the container's runtime identity — the agent's **instance identity** (a per-agent Microsoft Entra service principal). That principal has **no** skills access by default, so the download would fail with `Forbidden`. Grant it the **same** `Foundry User` role you hold.
+4. **Grant the deployed agent's instance identity `Foundry User` on the project.** Locally the agent downloaded the Foundry skill as *you*. Deployed, your `main.py` calls the Skills API with `DefaultAzureCredential`, which resolves the container's runtime identity — the agent's **instance identity** (a per-agent Microsoft Entra service principal). That principal has **no** skills access by default, so the download would fail with `Forbidden`. Grant it the **same** `Foundry User` role you hold.
 
    First retrieve the instance identity's principal ID from the **agent** (not a version), then assign the role. `$PROJECT_SCOPE` is the **same Foundry project scope you verified at the start of Part B**.
 
@@ -694,7 +635,7 @@ Re-init again to snapshot your Part B edits, and add the new variable to the azd
 
    > **Do you re-grant this on every redeploy? No.** The instance identity belongs to the **agent**, not to an agent *version*. `azd deploy` publishes a new version of the same agent, so the identity — and this role assignment — **carry over**. You only re-grant if you **delete and recreate** the agent (a new agent gets a new instance identity) or **publish** it to an agent application (a distinct identity). See [Retrieve the agent identity for role assignments](https://learn.microsoft.com/azure/foundry/agents/how-to/manage-hosted-agent#retrieve-the-agent-identity-for-role-assignments).
 
-6. **Invoke the deployed agent**:
+5. **Invoke the deployed agent**:
 
    <!-- terminal -->
    ```bash
@@ -729,11 +670,11 @@ Your Entra ID needs **`Foundry User`** (formerly *Azure AI User*) on the Foundry
 
 ### The **deployed** agent fails on startup with `Forbidden` / `403` downloading the Foundry skill
 
-This is the most common Part B surprise: everything works locally, then the deployed agent errors. The cause is **identity**, not code. Locally the agent downloads the skill as *your* `az login` user (who has `Foundry User` from the start of Part B). Deployed, your `main.py` startup code calls the Skills API with `DefaultAzureCredential`, which resolves the agent's **instance identity** — a per-agent service principal with no skills access by default. Grant that identity **`Foundry User`** on the project — see **step 5 of Part B** above (resolve `instance_identity.principal_id`, then `az role assignment create`). Wait a minute or two for RBAC to propagate, then retry. This grant is one-time per agent and survives redeploys.
+This is the most common Part B surprise: everything works locally, then the deployed agent errors. The cause is **identity**, not code. Locally the agent downloads the skill as *your* `az login` user (who has `Foundry User` from the start of Part B). Deployed, your `main.py` startup code calls the Skills API with `DefaultAzureCredential`, which resolves the agent's **instance identity** — a per-agent service principal with no skills access by default. Grant that identity **`Foundry User`** on the project — see **item 4 of B4** above (resolve `instance_identity.principal_id`, then `az role assignment create`). Wait a minute or two for RBAC to propagate, then retry. This grant is one-time per agent and survives redeploys.
 
 ### `Timed out` or "could not be downloaded" on startup
 
-The startup download is **fail-hard** because the Foundry skill is required — it raises instead of degrading. Work the checklist: (1) upload it (`python foundry_skills/provision_skills.py`), (2) grant `Foundry User` to the right identity, (3) ensure **public network access**. Also confirm `AZURE_AI_PROJECT_ENDPOINT` and `FOUNDRY_SKILL_NAMES` are set in both `.env` and the azd env.
+The startup download is **fail-hard** because the Foundry skill is required — it raises instead of degrading. Work the checklist: (1) upload it (`python foundry_skills/provision_skills.py`), (2) grant `Foundry User` to the right identity, (3) ensure **public network access**. Also confirm `SKILL_NAMES` is set in both `.env` and the azd env (`azd env get-values`) and that the `travel-buddy` service's `env` map in `azure.yaml` has `SKILL_NAMES: ${SKILL_NAMES}`. Locally, `AZURE_AI_PROJECT_ENDPOINT` must be in `.env`; deployed, `azure.yaml` maps it from `FOUNDRY_PROJECT_ENDPOINT`, which `azd ai project add` set in Step 1.
 
 ### `ModuleNotFoundError: azure.ai.projects`
 
@@ -749,11 +690,11 @@ That folder is a **runtime cache** in the OS temp dir — `main.py` deletes and 
 "message": "String length 568 exceeds maximum 512", "param": "description"
 ```
 
-Foundry caps the agent `description` at **512 characters**, and the manifest description grows with every step. Trim it — describe the shape of the agent, not every tool — then re-run `azd ai agent init` before `azd deploy`.
+Foundry caps the agent `description` at **512 characters**, and the `description` in `azure.yaml` grows with every step. Trim it — describe the shape of the agent, not every tool — then `azd deploy` again.
 
 ### Deploy didn't pick up my change
 
-`azd ai agent init` **copied** your code into `${WORKSHOP_RESOURCE_PREFIX}-travel-buddy/`, so edits in `travel_assistant/` don't deploy on their own. Re-run `azd ai agent init` to refresh the snapshot, then `azd deploy` again. (Edits in `foundry_skills/` are out-of-band and never deploy — re-run `provision_skills.py` instead.)
+`azd deploy` packages `travel_assistant/` straight from your working tree, so make sure you saved your edits and ran `azd deploy` from the **repo root** (where `azure.yaml` lives). If you added or changed an environment variable, `azd env set` it, confirm its entry exists in the `travel-buddy` service's `env` map in `azure.yaml`, and redeploy. (Edits in `foundry_skills/` are out-of-band and never deploy — re-run `provision_skills.py` instead.)
 
 ## Solution
 

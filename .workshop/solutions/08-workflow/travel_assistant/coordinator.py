@@ -172,8 +172,8 @@ SKILL_DOWNLOAD_TIMEOUT_SECONDS = 60.0
 
 
 def _foundry_skill_names() -> list[str]:
-    """Parse FOUNDRY_SKILL_NAMES, treating an unresolved ${VAR}/{{VAR}} as empty."""
-    raw = os.environ.get("FOUNDRY_SKILL_NAMES", "").strip()
+    """Parse SKILL_NAMES, treating an unresolved ${VAR}/{{VAR}} as empty."""
+    raw = os.environ.get("SKILL_NAMES", "").strip()
     if (raw.startswith("${") and raw.endswith("}")) or (raw.startswith("{{") and raw.endswith("}}")):
         raw = ""
     parsed = [name.strip().strip('"').strip("'") for name in raw.split(",")]
@@ -221,9 +221,9 @@ def _build_skills_provider() -> TrustedSkillsProvider:
     names = _foundry_skill_names()
     if not names:
         raise RuntimeError(
-            "FOUNDRY_SKILL_NAMES is empty. Upload the Foundry skill once with "
+            "SKILL_NAMES is empty. Upload the Foundry skill once with "
             "`python foundry_skills/provision_skills.py`, then set "
-            'FOUNDRY_SKILL_NAMES=response-guardrails so the agent can download it at startup.'
+            'SKILL_NAMES=response-guardrails so the agent can download it at startup.'
         )
     asyncio.run(
         asyncio.wait_for(
