@@ -14,4 +14,4 @@ Built on the upstream [foundry-samples](https://github.com/microsoft-foundry/fou
 
 </details>
 
-If something looks broken see [Troubleshooting](.workshop/docs/steps/00-intro.md#troubleshooting).
+If something looks broken see [Troubleshooting](../steps/00-intro.md#troubleshooting).

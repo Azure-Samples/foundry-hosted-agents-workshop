@@ -378,7 +378,7 @@ Make sure you ran `azd deploy` from the repo root (where `azure.yaml` lives) aft
 
 ## Solution
 
-> If you get stuck: [`.workshop/solutions/08-workflow/`](.workshop/solutions/08-workflow/)
+> If you get stuck: [`.workshop/solutions/08-workflow/`](../../solutions/08-workflow/)
 
 ## Upstream sample
 
